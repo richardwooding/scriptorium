@@ -1,1 +1,129 @@
-<!doctype html><meta charset="utf-8"><title>scriptorium</title><body class="gl"><p style="padding:2rem;font-family:system-ui">scriptorium — collaborative editing, coming right up.</p>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>scriptorium — shared editing, paired like a secret</title>
+  <meta name="description" content="A shared, end-to-end-encrypted collaborative editor. Share a phrase, edit together — the server can't read a word.">
+  <meta name="theme-color" content="#0d1117">
+  <link rel="stylesheet" href="gloam.css">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.json">
+  <script>try{var t=localStorage.getItem("gl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body class="gl">
+  <a class="gl-skip" href="#main">Skip to content</a>
+
+  <main id="main">
+    <!-- home -->
+    <section id="view-home" class="view gl-hero">
+      <div class="gl-wrap gl-hero-grid">
+        <div>
+          <p class="gl-eyebrow">no accounts · e2ee · crdt</p>
+          <h1>Write together, <span class="gl-grad">in secret.</span></h1>
+          <p class="sub">Share a code phrase and edit a set of files together —
+          live cursors, syntax highlighting, markdown preview. Every keystroke
+          is end-to-end encrypted; the server relays bytes it can't read.</p>
+
+          <div class="home-card">
+            <label for="name">Your name <span class="gl-hint-inline">(optional)</span></label>
+            <input id="name" type="text" maxlength="24" autocomplete="nickname" placeholder="e.g. Alex">
+            <label for="join-phrase">Have a code phrase? <span class="gl-hint-inline">(leave empty to start fresh)</span></label>
+            <input id="join-phrase" type="text" autocapitalize="none" autocomplete="off"
+                   spellcheck="false" placeholder="paste it here — like lion-42-maple">
+            <div class="home-actions">
+              <button id="btn-action" class="gl-btn primary" disabled>▶ New workspace</button>
+            </div>
+            <p id="home-status" class="gl-hint" role="status" aria-live="polite">loading the encrypted core…</p>
+          </div>
+        </div>
+        <div class="gl-term">
+          <div class="bar">
+            <span class="dot" style="background:#ff5f56"></span>
+            <span class="dot" style="background:#ffbd2e"></span>
+            <span class="dot" style="background:#27c93f"></span>
+            <span class="t">scriptorium</span>
+          </div>
+<pre><span class="pr">$</span> scriptorium new
+<span class="hd">WORKSPACE       STATUS</span>
+<span class="n">lion-42-maple</span>   <span class="ok">2 editing · e2ee</span>
+<span class="pr">$</span> _ README.md   <span class="loc">live preview</span>
+<span class="pr">$</span> _ main.go     <span class="loc">syntax highlighted</span></pre>
+        </div>
+      </div>
+      <footer class="home-foot gl-hint">
+        <span id="version-badge"></span> ·
+        <a href="https://github.com/richardwooding/scriptorium">GitHub</a> ·
+        built on <a href="https://github.com/richardwooding/parley">parley</a>
+      </footer>
+    </section>
+
+    <!-- workspace -->
+    <section id="view-workspace" class="view hidden" aria-label="Workspace">
+      <div class="ws-topbar">
+        <span class="ws-brand">scriptorium</span>
+        <span id="presence" class="presence" aria-label="People here"></span>
+        <span class="ws-spacer"></span>
+        <span id="cloud-status" class="cloud-status gl-hint" hidden></span>
+        <button id="btn-invite" class="gl-btn ghost" aria-label="Invite">Invite</button>
+        <button id="btn-chat" class="gl-btn ghost" aria-expanded="false">Chat<span id="chat-unread" class="unread" hidden></span></button>
+        <button id="btn-leave" class="gl-btn ghost leave">Leave</button>
+      </div>
+      <div class="ws-body">
+        <aside class="tree-pane" aria-label="Files">
+          <div class="tree-head">
+            <span>Files</span>
+            <span class="tree-actions">
+              <button id="btn-new-file" class="icon-btn" title="New file" aria-label="New file">＋</button>
+              <button id="btn-new-dir" class="icon-btn" title="New folder" aria-label="New folder">📁</button>
+            </span>
+          </div>
+          <ul id="tree" class="tree" role="tree"></ul>
+        </aside>
+        <div class="editor-pane">
+          <div id="tabs" class="tabs" role="tablist"></div>
+          <div id="editor-host" class="editor-host"></div>
+          <div id="empty-hint" class="empty-hint gl-hint">Select or create a file to start editing.</div>
+        </div>
+        <div id="preview-pane" class="preview-pane" hidden aria-label="Preview">
+          <div class="preview-head"><span>Preview</span></div>
+          <div id="preview" class="preview markdown-body"></div>
+        </div>
+        <aside id="chat-pane" class="chat-pane" hidden aria-label="Chat">
+          <div id="chat-log" class="chat-log" role="log" aria-live="polite"></div>
+          <form id="chat-form" class="chat-form">
+            <input id="chat-input" type="text" maxlength="4000" placeholder="say something…" autocomplete="off">
+            <button class="gl-btn primary" type="submit" aria-label="Send">➤</button>
+          </form>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <div id="invite-modal" class="modal" hidden>
+    <div class="modal-card">
+      <h2>Invite to this workspace</h2>
+      <p class="gl-hint">Anyone with the phrase can edit. It never leaves your browser except as a hash.</p>
+      <p class="phrase" id="invite-phrase"></p>
+      <img id="invite-qr" alt="QR code for the workspace link" width="200" height="200">
+      <div class="modal-actions">
+        <button id="btn-copy-link" class="gl-btn primary">Copy link</button>
+        <button id="btn-copy-phrase" class="gl-btn ghost">Copy phrase</button>
+        <button id="btn-close-invite" class="gl-btn ghost">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="alert" hidden></div>
+  <div id="reconnect-banner" class="reconnect" role="status" hidden>reconnecting to the server — your edits are safe and keep syncing peer-to-peer</div>
+
+  <script src="wasm_exec.js"></script>
+  <script src="gloam.js" defer></script>
+  <script src="yjs.bundle.js"></script>
+  <script src="markdown.bundle.js"></script>
+  <script src="editor.bundle.js"></script>
+  <script src="workspace.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
