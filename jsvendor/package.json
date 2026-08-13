@@ -20,7 +20,7 @@
     "@codemirror/lang-css": "6.3.0",
     "@codemirror/lang-python": "6.1.6",
     "@codemirror/lang-rust": "6.0.1",
-    "@codemirror/legacy-modes": "6.4.2",
+    "@codemirror/legacy-modes": "6.5.3",
     "@lezer/highlight": "1.2.1",
     "y-codemirror.next": "0.3.5",
     "markdown-it": "14.1.0",
