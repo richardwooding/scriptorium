@@ -124,6 +124,8 @@
 .ai-user { background: color-mix(in srgb, var(--gl-accent) 20%, transparent); align-self: flex-end; }
 .ai-assistant { background: var(--gl-bg); border: 1px solid var(--gl-border); }
 .ai-assistant :first-child { margin-top: 0; } .ai-assistant :last-child { margin-bottom: 0; }
+.ai-assistant.streaming { white-space: pre-wrap; }
+.ai-assistant.streaming::after { content: "▋"; color: var(--gl-accent); margin-left: 1px; }
 .ai-assistant pre { background: var(--gl-panel); padding: .5rem; border-radius: 6px; overflow-x: auto; }
 .ai-assistant code { font-family: ui-monospace, monospace; }
 .ai-action { font-family: ui-monospace, monospace; font-size: .78rem; color: var(--gl-green, #3fb950); padding: 0 .2rem; }

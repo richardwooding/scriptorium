@@ -159,36 +159,95 @@
         "anthropic-dangerous-direct-browser-access": "true",
       }),
       body: (c, system, hist) => ({
-        model: c.model, max_tokens: MAX_TOKENS, system,
+        model: c.model, max_tokens: MAX_TOKENS, system, stream: true,
         tools: TOOLS.map((t) => ({ name: t.name, description: t.description, input_schema: t.schema })),
         messages: toAnthropic(hist),
       }),
-      parse: (j) => {
-        let text = ""; const toolCalls = [];
-        for (const b of j.content || []) {
-          if (b.type === "text") text += b.text;
-          else if (b.type === "tool_use") toolCalls.push({ id: b.id, name: b.name, input: b.input || {} });
+      // SSE accumulator: text streams live; tool_use inputs arrive as
+      // input_json_delta fragments assembled per content-block index.
+      newAcc: () => ({ text: "", blocks: {} }),
+      onEvent: (e, acc, onText) => {
+        if (e.type === "error") throw new Error("provider error: " + ((e.error && e.error.message) || "unknown"));
+        if (e.type === "content_block_start") {
+          const cb = e.content_block || {};
+          acc.blocks[e.index] = cb.type === "tool_use"
+            ? { type: "tool_use", id: cb.id, name: cb.name, json: "" }
+            : { type: "text" };
+        } else if (e.type === "content_block_delta") {
+          const d = e.delta || {};
+          if (d.type === "text_delta") { acc.text += d.text; onText(d.text); }
+          else if (d.type === "input_json_delta") { const b = acc.blocks[e.index]; if (b) b.json += d.partial_json; }
         }
-        return { text, toolCalls };
+      },
+      finish: (acc) => {
+        const toolCalls = [];
+        for (const k of Object.keys(acc.blocks)) {
+          const b = acc.blocks[k];
+          if (b.type === "tool_use") toolCalls.push({ id: b.id, name: b.name, input: safeJSON(b.json || "{}") });
+        }
+        return { text: acc.text, toolCalls };
       },
     },
     openai: {
       url: (c) => c.base.replace(/\/+$/, "") + "/chat/completions",
       headers: (c) => ({ "content-type": "application/json", authorization: "Bearer " + c.key }),
       body: (c, system, hist) => ({
-        model: c.model,
+        model: c.model, stream: true,
         tools: TOOLS.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.schema } })),
         messages: toOpenAI(hist, system),
       }),
-      parse: (j) => {
-        const m = (j.choices && j.choices[0] && j.choices[0].message) || {};
-        const toolCalls = (m.tool_calls || []).map((tc) => ({
-          id: tc.id, name: tc.function.name, input: safeJSON(tc.function.arguments),
-        }));
-        return { text: m.content || "", toolCalls };
+      // SSE accumulator: content streams live; tool_calls arrive as deltas keyed
+      // by index, with arguments streamed in fragments.
+      newAcc: () => ({ text: "", tools: {} }),
+      onEvent: (e, acc, onText) => {
+        const ch = e.choices && e.choices[0];
+        if (!ch) return;
+        const d = ch.delta || {};
+        if (d.content) { acc.text += d.content; onText(d.content); }
+        for (const tc of d.tool_calls || []) {
+          const i = tc.index != null ? tc.index : 0;
+          const cur = acc.tools[i] || (acc.tools[i] = { id: "", name: "", args: "" });
+          if (tc.id) cur.id = tc.id;
+          if (tc.function) {
+            if (tc.function.name) cur.name = tc.function.name;
+            if (tc.function.arguments) cur.args += tc.function.arguments;
+          }
+        }
+      },
+      finish: (acc) => {
+        const toolCalls = Object.keys(acc.tools).sort((a, b) => a - b).map((k) => {
+          const t = acc.tools[k];
+          return { id: t.id, name: t.name, input: safeJSON(t.args || "{}") };
+        });
+        return { text: acc.text, toolCalls };
       },
     },
   };
+
+  // Read a Server-Sent-Events stream, handing each `data:` JSON payload to
+  // onEvent. Both providers embed a discriminating field in the payload, so we
+  // ignore `event:` lines and parse only `data:`. Cancels early if stopped.
+  async function readSSE(bodyStream, onEvent) {
+    const reader = bodyStream.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      if (stopped) { try { await reader.cancel(); } catch (_) { /* ignore */ } return; }
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n")) !== -1) {
+        const line = buf.slice(0, nl).replace(/\r$/, "");
+        buf = buf.slice(nl + 1);
+        if (!line.startsWith("data:")) continue;
+        const payload = line.slice(5).trim();
+        if (payload === "[DONE]") return;
+        let evt; try { evt = JSON.parse(payload); } catch (_) { continue; }
+        onEvent(evt);
+      }
+    }
+  }
 
   function buildSystem() {
     const tree = W.ai.list().map((f) => (f.kind === "dir" ? "📁 " : "   ") + f.path).join("\n");
@@ -204,7 +263,7 @@
     ].join("\n");
   }
 
-  async function callProvider(cfg, system) {
+  async function callProvider(cfg, system, onText) {
     const p = providers[cfg.provider];
     if (!p) throw new Error("unknown provider: " + cfg.provider);
     let res;
@@ -223,7 +282,10 @@
       if (res.status === 429) throw new Error("429 rate limited — check your plan/limits");
       throw new Error(res.status + " " + (detail || res.statusText));
     }
-    return p.parse(await res.json());
+    if (!res.body) throw new Error("no response stream from the provider");
+    const acc = p.newAcc();
+    await readSSE(res.body, (evt) => p.onEvent(evt, acc, onText));
+    return p.finish(acc);
   }
 
   // ---- agentic loop ------------------------------------------------------
@@ -241,9 +303,19 @@
     try {
       while (iter++ < MAX_ITERS) {
         if (stopped) { renderNote("stopped"); break; }
-        const { text, toolCalls } = await callProvider(cfg, buildSystem());
+        // Stream this step's text into a live bubble; finalize as markdown.
+        let streamEl = null, streamText = "";
+        const onText = (delta) => {
+          if (!streamEl) streamEl = beginAssistant();
+          streamText += delta;
+          streamEl.textContent = streamText;
+          scrollLog();
+        };
+        const { text, toolCalls } = await callProvider(cfg, buildSystem(), onText);
+        if (streamEl) finalizeAssistant(streamEl, streamText);
+        else if (text) renderMsg("assistant", text); // non-streamed fallback
+        if (stopped) { history.push({ role: "assistant", text, toolCalls: [] }); renderNote("stopped"); break; }
         history.push({ role: "assistant", text, toolCalls });
-        if (text) renderMsg("assistant", text);
         if (!toolCalls.length) break;
         const results = [];
         for (const tc of toolCalls) {
@@ -271,6 +343,21 @@
     if (role === "assistant" && window.MD) div.innerHTML = window.MD.render(text); // MD sanitizes
     else div.textContent = text;
     log.appendChild(div); scrollLog();
+  }
+  // Live streaming bubble: append empty, fill with plain text as tokens arrive
+  // (fast + safe), then re-render as sanitized markdown when the step completes.
+  function beginAssistant() {
+    const log = el("ai-log"); if (!log) return null;
+    const div = document.createElement("div");
+    div.className = "ai-msg ai-assistant streaming";
+    log.appendChild(div); scrollLog();
+    return div;
+  }
+  function finalizeAssistant(div, text) {
+    div.classList.remove("streaming");
+    if (window.MD) div.innerHTML = window.MD.render(text);
+    else div.textContent = text;
+    scrollLog();
   }
   function logAction(summary) {
     const log = el("ai-log"); if (!log) return;
