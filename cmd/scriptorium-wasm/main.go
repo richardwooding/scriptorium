@@ -21,9 +21,10 @@ import (
 
 	qrcode "github.com/skip2/go-qrcode"
 
-	"github.com/richardwooding/scriptorium/internal/proto"
 	"github.com/richardwooding/parley/service"
 	"github.com/richardwooding/parley/session"
+	"github.com/richardwooding/scriptorium/internal/doc"
+	"github.com/richardwooding/scriptorium/internal/proto"
 )
 
 type command struct {
@@ -31,10 +32,10 @@ type command struct {
 	Phrase string `json:"phrase,omitempty"`
 	Name   string `json:"name,omitempty"`
 	// doc-service fields (wired in M2)
-	FileID  string `json:"fileID,omitempty"`
-	Update  string `json:"update,omitempty"` // base64 opaque Yjs blob
-	To      uint32 `json:"to,omitempty"`
-	State   string `json:"state,omitempty"` // base64 catch-up state
+	FileID string `json:"fileID,omitempty"`
+	Update string `json:"update,omitempty"` // base64 opaque Yjs blob
+	To     uint32 `json:"to,omitempty"`
+	State  string `json:"state,omitempty"` // base64 catch-up state
 }
 
 type app struct {
@@ -42,6 +43,7 @@ type app struct {
 	gen    int
 	client *session.Client
 	mux    *service.Mux
+	doc    *doc.Service
 }
 
 var current app
@@ -66,9 +68,66 @@ func emit(typ string, fields map[string]any) {
 func emitError(msg string) { emit("error", map[string]any{"message": msg}) }
 
 var commands = map[string]func(command){
-	"create": func(c command) { create(c.Name) },
-	"join":   func(c command) { join(c.Phrase, c.Name) },
-	"leave":  func(command) { leave() },
+	"create":              func(c command) { create(c.Name) },
+	"join":                func(c command) { join(c.Phrase, c.Name) },
+	"leave":               func(command) { leave() },
+	"doc.update":          func(c command) { docUpdate(c.FileID, c.Update) },
+	"doc.awareness":       func(c command) { docAwareness(c.Update) },
+	"doc.catchup.provide": func(c command) { docCatchupProvide(c.To, c.FileID, c.State) },
+	"doc.catchup.end":     func(c command) { docCatchupEnd(c.To) },
+}
+
+func currentDoc() *doc.Service {
+	current.mu.Lock()
+	defer current.mu.Unlock()
+	return current.doc
+}
+
+func docUpdate(fileID, updateB64 string) {
+	d := currentDoc()
+	if d == nil {
+		return
+	}
+	raw, err := base64.StdEncoding.DecodeString(updateB64)
+	if err != nil {
+		emitError("bad update: " + err.Error())
+		return
+	}
+	if err := d.SendUpdate(fileID, raw); err != nil {
+		emitError(err.Error())
+	}
+}
+
+func docAwareness(updateB64 string) {
+	d := currentDoc()
+	if d == nil {
+		return
+	}
+	raw, err := base64.StdEncoding.DecodeString(updateB64)
+	if err != nil {
+		return
+	}
+	_ = d.SendAwareness(raw)
+}
+
+func docCatchupProvide(to uint32, fileID, stateB64 string) {
+	d := currentDoc()
+	if d == nil {
+		return
+	}
+	raw, err := base64.StdEncoding.DecodeString(stateB64)
+	if err != nil {
+		return
+	}
+	if err := d.ProvideCatchup(wireID(to), fileID, raw); err != nil {
+		emitError(err.Error())
+	}
+}
+
+func docCatchupEnd(to uint32) {
+	if d := currentDoc(); d != nil {
+		_ = d.EndCatchup(wireID(to))
+	}
 }
 
 func dispatch(raw string) {
@@ -138,10 +197,14 @@ func join(phrase, name string) {
 	}
 	start(client, name)
 	emit("session.joined", map[string]any{"self": uint32(client.Self())})
+	if d := currentDoc(); d != nil {
+		_ = d.RequestCatchup()
+	}
 }
 
 func start(client *session.Client, name string) {
-	mux := service.NewMux(client) // doc service added in M2
+	d := doc.New()
+	mux := service.NewMux(client, service.WithServices(d))
 	if name = strings.TrimSpace(name); name != "" {
 		mux.SetName(name)
 	}
@@ -150,7 +213,7 @@ func start(client *session.Client, name string) {
 	current.mu.Lock()
 	current.gen++
 	myGen := current.gen
-	current.client, current.mux = client, mux
+	current.client, current.mux, current.doc = client, mux, d
 	current.mu.Unlock()
 	go pump(mux, myGen)
 }
@@ -159,7 +222,7 @@ func closePrev() {
 	current.mu.Lock()
 	current.gen++
 	client, mux := current.client, current.mux
-	current.client, current.mux = nil, nil
+	current.client, current.mux, current.doc = nil, nil, nil
 	current.mu.Unlock()
 	if client != nil {
 		_ = client.Close()
@@ -190,13 +253,30 @@ func pump(mux *service.Mux, gen int) {
 				}
 			}
 			emit("roster", map[string]any{"members": members, "host": host})
+		case doc.Update:
+			emit("doc.update", map[string]any{
+				"from": uint32(e.From), "fileID": e.FileID,
+				"update": base64.StdEncoding.EncodeToString(e.Update),
+			})
+		case doc.Awareness:
+			emit("doc.awareness", map[string]any{
+				"from":   uint32(e.From),
+				"update": base64.StdEncoding.EncodeToString(e.Update),
+			})
+		case doc.CatchupReq:
+			emit("doc.catchup.request", map[string]any{"from": uint32(e.From)})
+		case doc.CatchupEnd:
+			emit("doc.catchup.end", map[string]any{"from": uint32(e.From)})
 		case service.Promoted:
 			emit("session.promoted", map[string]any{"self": uint32(e.Self)})
 		case service.ServiceError:
 			emitError(e.Service + ": " + e.Err.Error())
 		case service.SessionEvent:
-			if closed, ok := e.Event.(session.Closed); ok {
-				if !pumpClosed(mux, gen, closed.Reason) {
+			switch se := e.Event.(type) {
+			case session.MemberLeft:
+				emit("member.left", map[string]any{"id": uint32(se.ID)})
+			case session.Closed:
+				if !pumpClosed(mux, gen, se.Reason) {
 					return
 				}
 			}

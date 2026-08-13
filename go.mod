@@ -7,6 +7,7 @@ require (
 	github.com/richardwooding/flyaffinity v0.1.1
 	github.com/richardwooding/parley v0.5.0
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
+	golang.org/x/time v0.15.0
 )
 
 require (
@@ -18,5 +19,4 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/time v0.15.0 // indirect
 )
