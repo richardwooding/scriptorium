@@ -1,0 +1,35 @@
+# Weekly check that the committed JS bundles match a fresh vendor build from the
+# pinned versions, opening a PR if esbuild output drifts (e.g. a transitive
+# rebuild). Dependency version bumps themselves come via dependabot on
+# jsvendor/package.json; this keeps the built artifacts honest.
+name: js-vendor-sync
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: make vendor-js
+      - name: Open a PR if bundles changed
+        run: |
+          if ! git diff --quiet -- web/src/*.bundle.js web/src/.js-vendor-version; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            branch="js-vendor-sync-$(date +%Y%m%d)"
+            git checkout -b "$branch"
+            git add web/src/*.bundle.js web/src/.js-vendor-version
+            git commit -m "chore: refresh vendored JS bundles"
+            git push -u origin "$branch"
+            gh pr create --fill --title "chore: refresh vendored JS bundles" --body "Automated re-vendor of Yjs/CodeMirror/markdown bundles."
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
