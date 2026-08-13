@@ -67,6 +67,11 @@
     showWorkspace();
     if (isHost) Workspace.seedIfEmpty();
     else el("home-status").textContent = "";
+    // The AI assistant is a local, browser-only feature: it talks to the user's
+    // own provider directly and edits files via Workspace. Fresh per session.
+    if (window.Assistant) {
+      Assistant.init({ workspace: Workspace, self: { name: nameInput() || "anon", pid: selfId } });
+    }
   }
 
   function onCreated(e) {

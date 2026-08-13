@@ -67,6 +67,7 @@
         <span class="ws-spacer"></span>
         <span id="cloud-status" class="cloud-status gl-hint" hidden></span>
         <button id="btn-invite" class="gl-btn ghost" aria-label="Invite">Invite</button>
+        <button id="btn-ai" class="gl-btn ghost" aria-expanded="false" aria-controls="ai-pane">✦ Assistant</button>
         <button id="btn-chat" class="gl-btn ghost" aria-expanded="false">Chat<span id="chat-unread" class="unread" hidden></span></button>
         <button id="btn-leave" class="gl-btn ghost leave">Leave</button>
       </div>
@@ -97,6 +98,21 @@
             <button class="gl-btn primary" type="submit" aria-label="Send">➤</button>
           </form>
         </aside>
+        <aside id="ai-pane" class="ai-pane" hidden aria-label="AI assistant">
+          <div class="ai-head">
+            <span>✦ Assistant</span>
+            <span class="ai-head-actions">
+              <button id="btn-ai-settings" class="icon-btn" title="Settings" aria-label="Assistant settings">⚙</button>
+              <button id="btn-ai-close" class="icon-btn" title="Close" aria-label="Close assistant">✕</button>
+            </span>
+          </div>
+          <div id="ai-log" class="chat-log ai-log" role="log" aria-live="polite"></div>
+          <form id="ai-form" class="chat-form ai-form">
+            <input id="ai-input" type="text" maxlength="8000" placeholder="ask the assistant to read or edit files…" autocomplete="off">
+            <button id="ai-send" class="gl-btn primary" type="submit" aria-label="Send">➤</button>
+            <button id="ai-stop" class="gl-btn ghost" type="button" aria-label="Stop" hidden>■</button>
+          </form>
+        </aside>
       </div>
     </section>
   </main>
@@ -115,6 +131,35 @@
     </div>
   </div>
 
+  <div id="ai-settings" class="modal" hidden>
+    <div class="modal-card ai-settings-card">
+      <h2>Assistant settings</h2>
+      <p class="gl-hint">Bring your own key. It's stored only in this browser and sent
+        directly to your provider — never to the scriptorium server. Note: content you
+        share with the assistant leaves the end-to-end-encrypted session and goes to that
+        provider. A Claude Pro/Max subscription won't work here — use an Anthropic
+        <em>Console</em> API key (usage-billed) or any OpenAI-compatible endpoint.</p>
+      <label for="ai-provider">Provider</label>
+      <select id="ai-provider" class="ai-field">
+        <option value="anthropic">Anthropic (Claude)</option>
+        <option value="openai">OpenAI-compatible</option>
+      </select>
+      <div id="ai-base-row" hidden>
+        <label for="ai-base">Base URL <span class="gl-hint-inline">(OpenAI, OpenRouter, local Ollama…)</span></label>
+        <input id="ai-base" class="ai-field" type="text" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1">
+      </div>
+      <label for="ai-key">API key</label>
+      <input id="ai-key" class="ai-field" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…">
+      <label for="ai-model">Model</label>
+      <input id="ai-model" class="ai-field" type="text" autocomplete="off" spellcheck="false" placeholder="claude-sonnet-5">
+      <div class="modal-actions">
+        <button id="btn-ai-save" class="gl-btn primary">Save</button>
+        <button id="btn-ai-forget" class="gl-btn ghost">Forget key</button>
+        <button id="btn-ai-close-settings" class="gl-btn ghost">Close</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast" role="alert" hidden></div>
   <div id="reconnect-banner" class="reconnect" role="status" hidden>reconnecting to the server — your edits are safe and keep syncing peer-to-peer</div>
 
@@ -123,6 +168,7 @@
   <script src="markdown.bundle.js"></script>
   <script src="editor.bundle.js"></script>
   <script src="workspace.js"></script>
+  <script src="assistant.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

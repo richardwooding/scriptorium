@@ -19,6 +19,11 @@ design as its sibling [confab](https://github.com/richardwooding/confab).
   markdown preview.
 - **Ephemeral by default** — a workspace lives while someone's connected;
   optional encrypted cloud sync (Tigris) is a follow-up so workspaces persist.
+- **Optional AI assistant** — bring your own key (Anthropic Console, or any
+  OpenAI-compatible endpoint) and let it read and edit files on your behalf.
+  It runs in your browser and talks to your provider directly; content you share
+  with it leaves the E2EE session by your choice. See
+  [docs/AI-ASSISTANT.md](docs/AI-ASSISTANT.md).
 
 ## Run it
 

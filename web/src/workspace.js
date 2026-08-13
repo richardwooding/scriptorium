@@ -48,6 +48,7 @@
   let editor = null;       // { view, setLanguage, destroy } from CMEditor
   let previewObserver = null;
   let previewText = null;
+  let aiUndo = null;       // Y.UndoManager scoped to origin "ai" (assistant edits)
 
   // ---- lifecycle ---------------------------------------------------------
   function reset() {
@@ -56,6 +57,17 @@
     meta = doc.getMap("meta");
     contents = doc.getMap("contents");
     awareness = new Awareness(doc);
+    // Undo scoped to the AI assistant: tracks only "ai"-origin changes to the
+    // tree and every file's Y.Text (descendants of `contents`), so "undo this
+    // turn" reverts assistant edits without ever touching human/peer edits.
+    // captureTimeout:Infinity → edits never auto-split by time; a turn is
+    // delimited explicitly by aiCheckpoint()/stopCapturing(), so all of a turn's
+    // tool-call transactions (spread across model round-trips) merge into ONE
+    // undo item.
+    aiUndo = new Y.UndoManager([meta, contents], {
+      trackedOrigins: new Set(["ai"]),
+      captureTimeout: Infinity,
+    });
     openTabs = [];
     activeId = null;
     previewObserver = null;
@@ -357,11 +369,22 @@
     const states = awareness.getStates();
     states.forEach((st) => {
       const u = (st && st.user) || {};
+      const ai = st && st.ai;
       const chip = document.createElement("span");
-      chip.className = "who";
+      chip.className = "who" + (ai ? " ai-active" : "");
       chip.style.background = u.color || "#6e7681";
-      chip.title = u.name || "someone";
+      const who = u.name || "someone";
+      chip.title = ai
+        ? who + (ai.file ? " · assistant editing " + ai.file : " · assistant working")
+        : who;
       chip.textContent = (u.name || "?").slice(0, 1).toUpperCase();
+      if (ai) {
+        // subtle indicator so collaborators see an assistant is touching files
+        const spark = document.createElement("span");
+        spark.className = "ai-spark";
+        spark.textContent = "✦";
+        chip.appendChild(spark);
+      }
       box.appendChild(chip);
     });
   }
@@ -385,9 +408,162 @@
     });
   }
 
+  // ---- AI assistant file API ---------------------------------------------
+  // A path-based facade over the private Yjs model, for the assistant
+  // (assistant.js). The assistant speaks human paths ("src/main.go"), never Yjs
+  // ids. Every mutation runs inside `doc.transact(fn, "ai")` so it (a) broadcasts
+  // like a human edit — origin "ai" is not "remote" — and (b) is captured by the
+  // "ai"-scoped UndoManager for per-turn undo. Edits to an open file reflect in
+  // CodeMirror + the preview automatically via yCollab.
+  const AI_ORIGIN = "ai";
+  const splitPath = (p) => String(p || "").split("/").filter(Boolean);
+  const leafName = (p) => splitPath(p).pop() || "";
+  const previewStr = (s) => (s.length > 60 ? s.slice(0, 57) + "…" : s);
+
+  function pathToId(path) {
+    let parent = "";
+    let id = null;
+    for (const seg of splitPath(path)) {
+      const match = childrenOf(parent).find((cid) => meta.get(cid).name === seg);
+      if (match === undefined) return null;
+      id = match;
+      parent = match;
+    }
+    return id;
+  }
+  function idToPath(id) {
+    const parts = [];
+    let cur = id;
+    while (cur) {
+      const n = meta.get(cur);
+      if (!n) break;
+      parts.unshift(n.name);
+      cur = n.parent;
+    }
+    return parts.join("/");
+  }
+  // Ensure the directory chain for a leaf path exists; return the parent id.
+  function ensureParent(path) {
+    const parts = splitPath(path);
+    parts.pop(); // drop the leaf
+    let parent = "";
+    for (const seg of parts) {
+      let childId = childrenOf(parent).find((cid) => {
+        const n = meta.get(cid);
+        return n.kind === "dir" && n.name === seg;
+      });
+      if (childId === undefined) childId = createDir(seg, parent);
+      parent = childId;
+    }
+    return parent;
+  }
+  function requireFile(path) {
+    const id = pathToId(path);
+    if (!id) throw new Error("no such file: " + path);
+    if (meta.get(id).kind !== "file") throw new Error("not a file: " + path);
+    return id;
+  }
+
+  function fsList() {
+    const out = [];
+    meta.forEach((n, id) => out.push({ path: idToPath(id), kind: n.kind }));
+    out.sort((a, b) => a.path.localeCompare(b.path));
+    return out;
+  }
+  function fsRead(path) {
+    const t = contents.get(requireFile(path));
+    return t ? t.toString() : "";
+  }
+  function fsEdit(path, edits) {
+    const t = contents.get(requireFile(path));
+    if (!Array.isArray(edits) || edits.length === 0) throw new Error("no edits provided");
+    let count = 0;
+    doc.transact(() => {
+      for (const e of edits) {
+        const oldStr = e.old_string;
+        const newStr = e.new_string != null ? e.new_string : "";
+        if (!oldStr) throw new Error("edit missing old_string");
+        const s = t.toString();
+        const idxs = [];
+        for (let at = s.indexOf(oldStr); at !== -1; at = s.indexOf(oldStr, at + oldStr.length)) idxs.push(at);
+        if (idxs.length === 0) throw new Error("old_string not found in " + path + ": " + previewStr(oldStr));
+        if (idxs.length > 1 && !e.replace_all) {
+          throw new Error("old_string is not unique in " + path + " (" + idxs.length + " matches) — add surrounding context or set replace_all");
+        }
+        const targets = e.replace_all ? idxs : [idxs[0]];
+        for (let i = targets.length - 1; i >= 0; i--) { // last→first keeps offsets valid
+          t.delete(targets[i], oldStr.length);
+          if (newStr) t.insert(targets[i], newStr);
+          count++;
+        }
+      }
+    }, AI_ORIGIN);
+    return "edited " + path + " (" + count + " change" + (count === 1 ? "" : "s") + ")";
+  }
+  function fsWrite(path, content) {
+    content = content != null ? content : "";
+    doc.transact(() => {
+      let id = pathToId(path);
+      if (!id) id = createFile(leafName(path), ensureParent(path));
+      else if (meta.get(id).kind !== "file") throw new Error("not a file: " + path);
+      const t = contents.get(id);
+      if (t.length) t.delete(0, t.length);
+      if (content) t.insert(0, content);
+    }, AI_ORIGIN);
+    return "wrote " + path + " (" + content.length + " chars)";
+  }
+  function fsCreate(path, content) {
+    if (pathToId(path)) throw new Error("already exists: " + path);
+    content = content != null ? content : "";
+    doc.transact(() => {
+      const id = createFile(leafName(path), ensureParent(path));
+      if (content) contents.get(id).insert(0, content);
+    }, AI_ORIGIN);
+    return "created " + path;
+  }
+  function fsRename(path, newPath) {
+    const id = pathToId(path);
+    if (!id) throw new Error("no such path: " + path);
+    if (pathToId(newPath)) throw new Error("target exists: " + newPath);
+    doc.transact(() => {
+      const parent = ensureParent(newPath);
+      meta.set(id, Object.assign({}, meta.get(id), { name: leafName(newPath), parent }));
+    }, AI_ORIGIN);
+    return "renamed " + path + " → " + newPath;
+  }
+  function fsDelete(path) {
+    const id = pathToId(path);
+    if (!id) throw new Error("no such path: " + path);
+    doc.transact(() => deleteNode(id), AI_ORIGIN);
+    return "deleted " + path;
+  }
+  function fsFocus(path) {
+    const id = requireFile(path);
+    openFile(id);
+    return "focused " + path;
+  }
+
+  function aiCheckpoint() { if (aiUndo) aiUndo.stopCapturing(); }
+  function aiUndoTurn() {
+    if (!aiUndo) return false;
+    const item = aiUndo.undo();
+    return item != null;
+  }
+  // Publish/clear the assistant-activity awareness field (drives the peer ✦).
+  function setAIActivity(info) {
+    if (awareness) awareness.setLocalStateField("ai", info || null);
+    renderPresence();
+  }
+
   window.Workspace = {
     reset, setSend, setSelf, setHost, seedIfEmpty, wireControls,
     applyUpdate, applyAwareness, onCatchupRequest, onCatchupEnd,
     renderPresence, removePeer,
+    // AI assistant surface (assistant.js)
+    ai: {
+      list: fsList, read: fsRead, edit: fsEdit, write: fsWrite,
+      create: fsCreate, rename: fsRename, remove: fsDelete, focus: fsFocus,
+      checkpoint: aiCheckpoint, undo: aiUndoTurn, activity: setAIActivity,
+    },
   };
 })();
