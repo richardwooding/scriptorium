@@ -178,7 +178,7 @@ func TestCatchupEndToEnd(t *testing.T) {
 	}
 	gotTree, gotBig, gotEnd := false, false, false
 	deadline := time.After(10 * time.Second)
-	for !(gotTree && gotBig && gotEnd) {
+	for !gotTree || !gotBig || !gotEnd {
 		select {
 		case ev, ok := <-j.mux.Events():
 			if !ok {
