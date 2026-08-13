@@ -14,7 +14,7 @@
   "use strict";
 
   const Y = window.Y;
-  const { Awareness, encodeAwarenessUpdate, applyAwarenessUpdate } = window.YProto;
+  const { Awareness, encodeAwarenessUpdate, applyAwarenessUpdate, removeAwarenessStates } = window.YProto;
   const REMOTE = "remote"; // transaction origin tag for peer-applied updates
   const WS = "@ws";        // single fileID for the whole-workspace update stream
 
@@ -83,8 +83,25 @@
   function setSelf(info) {
     self = Object.assign(self, info || {});
     if (awareness) {
-      awareness.setLocalStateField("user", { name: self.name, color: self.color });
+      // Stamp our parley participant id into the awareness state so peers can
+      // prune it the moment `member.left` fires (awareness is otherwise keyed
+      // by Yjs clientID, which the core's leave event can't reference).
+      awareness.setLocalStateField("user", { name: self.name, color: self.color, pid: self.pid });
     }
+  }
+
+  // A peer left the session: drop any awareness state we're holding for their
+  // parley id, so their presence chip disappears at once instead of waiting for
+  // Yjs's ~30s awareness timeout. Tagged REMOTE so we don't rebroadcast — every
+  // client independently gets the same member.left and prunes its own copy.
+  function removePeer(pid) {
+    if (!awareness) return;
+    const gone = [];
+    awareness.getStates().forEach((st, clientID) => {
+      if (st && st.user && st.user.pid === pid) gone.push(clientID);
+    });
+    if (gone.length) removeAwarenessStates(awareness, gone, REMOTE);
+    renderPresence();
   }
   function setHost(isHost) { self.host = !!isHost; }
 
@@ -371,6 +388,6 @@
   window.Workspace = {
     reset, setSend, setSelf, setHost, seedIfEmpty, wireControls,
     applyUpdate, applyAwareness, onCatchupRequest, onCatchupEnd,
-    renderPresence,
+    renderPresence, removePeer,
   };
 })();

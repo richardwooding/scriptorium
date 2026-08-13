@@ -62,7 +62,7 @@
   function enterWorkspace(isHost) {
     Workspace.reset();
     Workspace.setSend(send);
-    Workspace.setSelf({ name: nameInput() || "anon", color: colorFor(selfId) });
+    Workspace.setSelf({ name: nameInput() || "anon", color: colorFor(selfId), pid: selfId });
     Workspace.setHost(isHost);
     showWorkspace();
     if (isHost) Workspace.seedIfEmpty();
@@ -111,7 +111,7 @@
     "doc.awareness": (e) => Workspace.applyAwareness(e.from, e.update),
     "doc.catchup.request": (e) => Workspace.onCatchupRequest(e.from >>> 0),
     "doc.catchup.end": (e) => Workspace.onCatchupEnd(e.from >>> 0),
-    "member.left": () => Workspace.renderPresence(),
+    "member.left": (e) => Workspace.removePeer(e.id >>> 0),
     "session.promoted": (e) => { selfId = e.self >>> 0; hostId = selfId; Workspace.setHost(true); toast("you're the host now"); },
     "session.reconnecting": () => { el("reconnect-banner").hidden = false; },
     "session.resumed": () => { el("reconnect-banner").hidden = true; toast("reconnected"); },
@@ -197,7 +197,16 @@
     }
   }
 
+  // Register the service worker for fast repeat loads / offline shell. It never
+  // intercepts /ws and is network-first for navigations and the wasm, so a
+  // deploy is never served stale.
+  function registerSW() {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+    }
+  }
+
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", () => { boot(); loadCore(); });
-  } else { boot(); loadCore(); }
+    document.addEventListener("DOMContentLoaded", () => { boot(); loadCore(); registerSW(); });
+  } else { boot(); loadCore(); registerSW(); }
 })();
