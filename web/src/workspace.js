@@ -50,6 +50,7 @@
   let previewText = null;
   let aiUndo = null;       // Y.UndoManager scoped to origin "ai" (assistant edits)
   let previewEnabled = true; // user toggle for the preview pane (persisted)
+  let huddleObserver = null; // huddle.js callback: who's in the voice huddle
 
   // ---- lifecycle ---------------------------------------------------------
   function reset() {
@@ -396,13 +397,14 @@
     states.forEach((st) => {
       const u = (st && st.user) || {};
       const ai = st && st.ai;
+      const hud = st && st.huddle && st.huddle.on;
       const chip = document.createElement("span");
       chip.className = "who" + (ai ? " ai-active" : "");
       chip.style.background = u.color || "#6e7681";
       const who = u.name || "someone";
       chip.title = ai
         ? who + (ai.file ? " · assistant editing " + ai.file : " · assistant working")
-        : who;
+        : (hud ? who + " · in the huddle" + (st.huddle.muted ? " (muted)" : "") : who);
       chip.textContent = (u.name || "?").slice(0, 1).toUpperCase();
       if (ai) {
         // subtle indicator so collaborators see an assistant is touching files
@@ -411,9 +413,38 @@
         spark.textContent = "✦";
         chip.appendChild(spark);
       }
+      if (hud) {
+        // 🎙 badge so collaborators see who's in the voice huddle
+        const mic = document.createElement("span");
+        mic.className = "huddle-mic";
+        mic.textContent = st.huddle.muted ? "🔇" : "🎙";
+        chip.appendChild(mic);
+      }
       box.appendChild(chip);
     });
+    notifyHuddle();
   }
+
+  // ---- huddle (voice-chat membership over awareness) ---------------------
+  // Membership is published as an awareness field so huddle.js knows exactly
+  // who has JOINED voice (a peer only meshes with those who opted in — a
+  // collaborator merely editing is never pulled into audio).
+  function setHuddle(info) {
+    if (awareness) awareness.setLocalStateField("huddle", info || null);
+    renderPresence();
+  }
+  function huddleMembers() {
+    const out = [];
+    if (!awareness) return out;
+    awareness.getStates().forEach((st) => {
+      if (st && st.huddle && st.huddle.on && st.user) {
+        out.push({ pid: st.user.pid, name: st.user.name || ("#" + st.user.pid), muted: !!st.huddle.muted });
+      }
+    });
+    return out;
+  }
+  function registerHuddleObserver(fn) { huddleObserver = fn; if (fn) fn(huddleMembers()); }
+  function notifyHuddle() { if (huddleObserver) huddleObserver(huddleMembers()); }
 
   function setStatus(msg) {
     const s = el("home-status");
@@ -593,6 +624,8 @@
     reset, setSend, setSelf, setHost, seedIfEmpty, wireControls,
     applyUpdate, applyAwareness, onCatchupRequest, onCatchupEnd,
     renderPresence, removePeer,
+    // huddle voice-chat membership (huddle.js)
+    setHuddle, registerHuddleObserver,
     // AI assistant surface (assistant.js)
     ai: {
       list: fsList, read: fsRead, edit: fsEdit, write: fsWrite,

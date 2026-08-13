@@ -72,6 +72,15 @@
     if (window.Assistant) {
       Assistant.init({ workspace: Workspace, self: { name: nameInput() || "anon", pid: selfId } });
     }
+    // The huddle (WebRTC voice) meshes peers over the same session; signaling
+    // rides the core, audio is P2P. Fresh per session. The send wrapper adapts
+    // huddle.js's (to,kind,payload) calls to the bridge's huddle.signal command.
+    if (window.Huddle) {
+      Huddle.init({
+        send: (to, kind, payload) => send({ type: "huddle.signal", to, kind, payload }),
+        self: { id: selfId, name: nameInput() || "anon" },
+      });
+    }
   }
 
   function onCreated(e) {
@@ -98,6 +107,7 @@
   }
 
   function onClosed(reason) {
+    if (window.Huddle) Huddle.leave();
     toast(reason ? "session ended: " + reason : "session ended");
     showHome();
     el("reconnect-banner").hidden = true;
@@ -116,10 +126,11 @@
     "doc.awareness": (e) => Workspace.applyAwareness(e.from, e.update),
     "doc.catchup.request": (e) => Workspace.onCatchupRequest(e.from >>> 0),
     "doc.catchup.end": (e) => Workspace.onCatchupEnd(e.from >>> 0),
-    "member.left": (e) => Workspace.removePeer(e.id >>> 0),
+    "huddle.signal": (e) => { if (window.Huddle) Huddle.onSignal(e); },
+    "member.left": (e) => { Workspace.removePeer(e.id >>> 0); if (window.Huddle) Huddle.onMemberLeft(e.id >>> 0); },
     "session.promoted": (e) => { selfId = e.self >>> 0; hostId = selfId; Workspace.setHost(true); toast("you're the host now"); },
     "session.reconnecting": () => { el("reconnect-banner").hidden = false; },
-    "session.resumed": () => { el("reconnect-banner").hidden = true; toast("reconnected"); },
+    "session.resumed": () => { el("reconnect-banner").hidden = true; toast("reconnected"); if (window.Huddle) Huddle.resumed(); },
     "session.closed": (e) => onClosed(e.reason),
     "error": (e) => { toast(e.message || "something went wrong"); el("btn-action").disabled = !coreReady; },
   };
@@ -152,7 +163,7 @@
         doAction();
       }
     });
-    window.addEventListener("pagehide", () => { if (isInWorkspace()) send({ type: "leave" }); });
+    window.addEventListener("pagehide", () => { if (isInWorkspace()) { if (window.Huddle) Huddle.leave(); send({ type: "leave" }); } });
     // Deep-link on first load.
     if (location.hash.length > 1) {
       el("join-phrase").value = location.hash.slice(1);
@@ -169,7 +180,7 @@
     el("btn-close-invite").addEventListener("click", closeInvite);
     el("btn-copy-link").addEventListener("click", () => copy(shareLink, "link copied"));
     el("btn-copy-phrase").addEventListener("click", () => copy(phrase, "phrase copied"));
-    el("btn-leave").addEventListener("click", () => { send({ type: "leave" }); });
+    el("btn-leave").addEventListener("click", () => { if (window.Huddle) Huddle.leave(); send({ type: "leave" }); });
     // Chat is a fast-follow (needs the parley chat service wired into the core);
     // hide its controls until then rather than show dead UI.
     if (el("btn-chat")) el("btn-chat").hidden = true;

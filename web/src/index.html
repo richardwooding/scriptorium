@@ -68,6 +68,7 @@
         <span id="cloud-status" class="cloud-status gl-hint" hidden></span>
         <button id="btn-invite" class="gl-btn ghost" aria-label="Invite">Invite</button>
         <button id="btn-preview" class="gl-btn ghost" aria-pressed="true" aria-controls="preview-pane" title="Toggle preview">◨ Preview</button>
+        <button id="btn-huddle" class="gl-btn ghost" aria-expanded="false" aria-controls="huddle-pane" title="Voice huddle">🎙 Huddle</button>
         <button id="btn-ai" class="gl-btn ghost" aria-expanded="false" aria-controls="ai-pane">✦ Assistant</button>
         <button id="btn-chat" class="gl-btn ghost" aria-expanded="false">Chat<span id="chat-unread" class="unread" hidden></span></button>
         <button id="btn-leave" class="gl-btn ghost leave">Leave</button>
@@ -116,6 +117,19 @@
             <button id="ai-send" class="gl-btn primary" type="submit" aria-label="Send">➤</button>
             <button id="ai-stop" class="gl-btn ghost" type="button" aria-label="Stop" hidden>■</button>
           </form>
+        </aside>
+        <aside id="huddle-pane" class="huddle-pane" hidden aria-label="Voice huddle">
+          <div class="ai-head">
+            <span>🎙 Huddle</span>
+            <button id="btn-huddle-close" class="icon-btn" title="Close" aria-label="Close huddle">✕</button>
+          </div>
+          <div id="huddle-list" class="huddle-list" role="list" aria-live="polite"></div>
+          <div class="huddle-ctl">
+            <button id="huddle-join" class="gl-btn primary">Join voice</button>
+            <button id="huddle-mute" class="gl-btn ghost" type="button" aria-pressed="false" hidden>🎙 Mute</button>
+          </div>
+          <p class="gl-hint huddle-note">Peer-to-peer &amp; encrypted — audio never touches the server. Mesh + STUN; some networks (symmetric NAT) may not connect.</p>
+          <div id="huddle-audio" hidden></div>
         </aside>
       </div>
     </section>
@@ -173,6 +187,7 @@
   <script src="editor.bundle.js"></script>
   <script src="workspace.js"></script>
   <script src="assistant.js"></script>
+  <script src="huddle.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

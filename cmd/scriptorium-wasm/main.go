@@ -24,6 +24,7 @@ import (
 	"github.com/richardwooding/parley/service"
 	"github.com/richardwooding/parley/session"
 	"github.com/richardwooding/scriptorium/internal/doc"
+	"github.com/richardwooding/scriptorium/internal/huddle"
 	"github.com/richardwooding/scriptorium/internal/proto"
 )
 
@@ -31,11 +32,14 @@ type command struct {
 	Type   string `json:"type"`
 	Phrase string `json:"phrase,omitempty"`
 	Name   string `json:"name,omitempty"`
-	// doc-service fields (wired in M2)
+	// doc-service fields
 	FileID string `json:"fileID,omitempty"`
 	Update string `json:"update,omitempty"` // base64 opaque Yjs blob
 	To     uint32 `json:"to,omitempty"`
 	State  string `json:"state,omitempty"` // base64 catch-up state
+	// huddle-service fields (opaque WebRTC signaling)
+	Kind    string `json:"kind,omitempty"`    // offer|answer|ice|bye
+	Payload string `json:"payload,omitempty"` // opaque SDP/ICE JSON string
 }
 
 type app struct {
@@ -44,6 +48,7 @@ type app struct {
 	client *session.Client
 	mux    *service.Mux
 	doc    *doc.Service
+	huddle *huddle.Service
 }
 
 var current app
@@ -75,12 +80,29 @@ var commands = map[string]func(command){
 	"doc.awareness":       func(c command) { docAwareness(c.Update) },
 	"doc.catchup.provide": func(c command) { docCatchupProvide(c.To, c.FileID, c.State) },
 	"doc.catchup.end":     func(c command) { docCatchupEnd(c.To) },
+	"huddle.signal":       func(c command) { huddleSignal(c.To, c.Kind, c.Payload) },
 }
 
 func currentDoc() *doc.Service {
 	current.mu.Lock()
 	defer current.mu.Unlock()
 	return current.doc
+}
+
+func currentHuddle() *huddle.Service {
+	current.mu.Lock()
+	defer current.mu.Unlock()
+	return current.huddle
+}
+
+func huddleSignal(to uint32, kind, payload string) {
+	h := currentHuddle()
+	if h == nil {
+		return
+	}
+	if err := h.Send(wireID(to), kind, payload); err != nil {
+		emitError(err.Error())
+	}
 }
 
 func docUpdate(fileID, updateB64 string) {
@@ -204,7 +226,8 @@ func join(phrase, name string) {
 
 func start(client *session.Client, name string) {
 	d := doc.New()
-	mux := service.NewMux(client, service.WithServices(d))
+	h := huddle.New()
+	mux := service.NewMux(client, service.WithServices(d, h))
 	if name = strings.TrimSpace(name); name != "" {
 		mux.SetName(name)
 	}
@@ -213,7 +236,7 @@ func start(client *session.Client, name string) {
 	current.mu.Lock()
 	current.gen++
 	myGen := current.gen
-	current.client, current.mux, current.doc = client, mux, d
+	current.client, current.mux, current.doc, current.huddle = client, mux, d, h
 	current.mu.Unlock()
 	go pump(mux, myGen)
 }
@@ -222,7 +245,7 @@ func closePrev() {
 	current.mu.Lock()
 	current.gen++
 	client, mux := current.client, current.mux
-	current.client, current.mux, current.doc = nil, nil, nil
+	current.client, current.mux, current.doc, current.huddle = nil, nil, nil, nil
 	current.mu.Unlock()
 	if client != nil {
 		_ = client.Close()
@@ -267,6 +290,10 @@ func pump(mux *service.Mux, gen int) {
 			emit("doc.catchup.request", map[string]any{"from": uint32(e.From)})
 		case doc.CatchupEnd:
 			emit("doc.catchup.end", map[string]any{"from": uint32(e.From)})
+		case huddle.Signal:
+			emit("huddle.signal", map[string]any{
+				"from": uint32(e.From), "kind": e.Kind, "payload": e.Payload,
+			})
 		case service.Promoted:
 			emit("session.promoted", map[string]any{"self": uint32(e.Self)})
 		case service.ServiceError:

@@ -24,6 +24,9 @@ design as its sibling [confab](https://github.com/richardwooding/confab).
   It runs in your browser and talks to your provider directly; content you share
   with it leaves the E2EE session by your choice. See
   [docs/AI-ASSISTANT.md](docs/AI-ASSISTANT.md).
+- **Huddle (voice chat)** — one-click peer-to-peer voice while you edit (WebRTC
+  full mesh + STUN). Audio flows P2P and encrypted, never through the server;
+  signaling is opaque over parley. See [docs/HUDDLE.md](docs/HUDDLE.md).
 
 ## Run it
 

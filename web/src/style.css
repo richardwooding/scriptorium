@@ -150,6 +150,23 @@
 .chat-form { display: flex; gap: .3rem; padding: .5rem; border-top: 1px solid var(--gl-border); }
 .chat-form input { flex: 1; background: var(--gl-bg); color: var(--gl-fg); border: 1px solid var(--gl-border); border-radius: 8px; padding: .4rem; }
 
+/* ---- huddle (voice chat) --------------------------------------------- */
+.huddle-pane { width: 17rem; flex: 0 0 17rem; border-left: 1px solid var(--gl-border); display: flex; flex-direction: column; min-height: 0; background: var(--gl-panel); }
+.huddle-list { flex: 1; overflow-y: auto; padding: .5rem; display: flex; flex-direction: column; gap: .3rem; }
+.huddle-empty { padding: .5rem; }
+.huddle-row { display: flex; align-items: center; gap: .5rem; padding: .35rem .5rem; border-radius: 10px; border: 1px solid transparent; }
+.huddle-row.speaking { border-color: var(--gl-accent); background: color-mix(in srgb, var(--gl-accent) 14%, transparent); }
+.huddle-row-mic { flex: 0 0 auto; }
+.huddle-row-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .9rem; }
+.huddle-row-state { flex: 0 0 auto; font-size: .72rem; }
+.huddle-ctl { display: flex; gap: .4rem; padding: .5rem; border-top: 1px solid var(--gl-border); }
+.huddle-ctl #huddle-join { flex: 1; }
+#huddle-join.on { background: color-mix(in srgb, #ff7b72 85%, transparent); }
+.huddle-note { padding: 0 .6rem .6rem; font-size: .72rem; }
+#btn-huddle.on { color: var(--gl-accent); border-color: color-mix(in srgb, var(--gl-accent) 45%, transparent); }
+/* 🎙 presence badge for anyone in the huddle */
+.huddle-mic { position: absolute; margin: -0.9rem 0 0 -0.45rem; font-size: .6rem; }
+
 /* ---- modal / toast / banner ------------------------------------------ */
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 50; }
 .modal[hidden] { display: none; }
@@ -167,7 +184,7 @@
 @media (max-width: 900px) {
   .preview-pane { display: none; }
   .tree-pane { width: 11rem; flex-basis: 11rem; }
-  .ai-pane { position: absolute; right: 0; top: 0; height: 100%; z-index: 25; box-shadow: -8px 0 24px rgba(0,0,0,.4); }
+  .ai-pane, .huddle-pane { position: absolute; right: 0; top: 0; height: 100%; z-index: 25; box-shadow: -8px 0 24px rgba(0,0,0,.4); }
 }
 @media (max-width: 640px) {
   .tree-pane { position: absolute; z-index: 20; height: 100%; }
