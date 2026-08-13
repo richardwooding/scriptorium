@@ -2,6 +2,9 @@
 
 .view { min-height: 100vh; }
 .hidden { display: none !important; }
+/* The `hidden` attribute must win over any class that sets `display` (a class
+   selector out-specifies the UA `[hidden]` rule otherwise). */
+[hidden] { display: none !important; }
 
 /* ---- home ------------------------------------------------------------ */
 .sub { color: var(--gl-fg-dim); max-width: 46ch; margin: .75rem 0 1.5rem; line-height: 1.55; }

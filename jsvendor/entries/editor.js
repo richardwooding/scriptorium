@@ -1,6 +1,14 @@
-// Bundled CodeMirror 6 + Yjs binding + a language-by-extension map, exposed as
-// window.CMEditor. The app (editor.js in web/src) calls CMEditor.create(...)
-// and CMEditor.languageForPath(...); it never imports CM modules directly.
+// Bundled Yjs + CodeMirror 6 + the Yjs binding + a language-by-extension map.
+// Exposes window.Y / window.YProto (Yjs + awareness) AND window.CMEditor from a
+// SINGLE bundle, so there is exactly ONE copy of Yjs in the page — importing
+// Yjs twice breaks its constructor/instanceof checks and silently stops
+// y-codemirror.next from binding (the editor looks frozen). workspace.js
+// creates docs with the same window.Y this file binds against.
+import * as Y from "yjs";
+import { Awareness, encodeAwarenessUpdate, applyAwarenessUpdate, removeAwarenessStates } from "y-protocols/awareness.js";
+window.Y = Y;
+window.YProto = { Awareness, encodeAwarenessUpdate, applyAwarenessUpdate, removeAwarenessStates };
+
 import { EditorState, Compartment } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";

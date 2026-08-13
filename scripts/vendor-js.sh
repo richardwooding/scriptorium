@@ -13,7 +13,6 @@ run() {
     --bundle --format=iife --minify --target=es2020 \
     --outfile="$here/web/src/$2.bundle.js"
 }
-run yjs yjs
 run editor editor
 run markdown markdown
 # record the resolved versions for drift detection
