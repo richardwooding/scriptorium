@@ -87,9 +87,13 @@
   display: flex; flex-direction: column; min-height: 0; background: var(--gl-bg);
 }
 .preview-head {
+  display: flex; align-items: center; justify-content: space-between;
   padding: .5rem .75rem; font-size: .75rem; text-transform: uppercase;
   letter-spacing: .06em; color: var(--gl-fg-dim); border-bottom: 1px solid var(--gl-border);
 }
+/* preview toggle: accent when on, dimmed when the active file has no preview */
+#btn-preview.on { color: var(--gl-accent); border-color: color-mix(in srgb, var(--gl-accent) 45%, transparent); }
+#btn-preview:disabled { opacity: .4; cursor: default; }
 .preview { padding: 1rem 1.25rem; overflow-y: auto; flex: 1; line-height: 1.6; }
 .markdown-body h1, .markdown-body h2, .markdown-body h3 { border-bottom: 1px solid var(--gl-border); padding-bottom: .2em; }
 .markdown-body code { background: var(--gl-panel); padding: .1em .3em; border-radius: 4px; font-family: ui-monospace, monospace; }

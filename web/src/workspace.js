@@ -49,6 +49,7 @@
   let previewObserver = null;
   let previewText = null;
   let aiUndo = null;       // Y.UndoManager scoped to origin "ai" (assistant edits)
+  let previewEnabled = true; // user toggle for the preview pane (persisted)
 
   // ---- lifecycle ---------------------------------------------------------
   function reset() {
@@ -336,11 +337,15 @@
     if (hint) hint.hidden = !!activeId;
   }
 
-  // ---- markdown preview --------------------------------------------------
+  // ---- preview -----------------------------------------------------------
   function isMarkdown(name) {
     const ext = (name.split(".").pop() || "").toLowerCase();
     return ext === "md" || ext === "markdown";
   }
+  // Which file types render a live preview. Markdown today; extend here (e.g.
+  // html) and the toggle/plumbing below applies automatically.
+  function previewable(name) { return isMarkdown(name); }
+
   function syncPreview() {
     const pane = el("preview-pane");
     if (!pane) return;
@@ -350,7 +355,9 @@
       previewText = null;
     }
     const n = activeId ? meta.get(activeId) : null;
-    if (!n || !isMarkdown(n.name)) { pane.hidden = true; return; }
+    const show = previewEnabled && n && previewable(n.name);
+    updatePreviewToggle(n);
+    if (!show) { pane.hidden = true; return; }
     pane.hidden = false;
     const t = contents.get(activeId);
     if (!t) return;
@@ -360,6 +367,25 @@
     t.observe(draw);
     draw();
   }
+  // Reflect the toggle's on/off state; disable it when the active file has no
+  // preview, so it's clear the control only applies to previewable files.
+  function updatePreviewToggle(node) {
+    const btn = el("btn-preview");
+    if (!btn) return;
+    const applicable = !!(node && previewable(node.name));
+    btn.setAttribute("aria-pressed", previewEnabled ? "true" : "false");
+    btn.classList.toggle("on", previewEnabled);
+    btn.disabled = !applicable;
+    btn.title = applicable
+      ? (previewEnabled ? "Hide preview" : "Show preview")
+      : "Preview (available for markdown files)";
+  }
+  function setPreviewEnabled(on) {
+    previewEnabled = !!on;
+    try { localStorage.setItem("scriptorium-preview", previewEnabled ? "1" : "0"); } catch (_) { /* private mode */ }
+    syncPreview();
+  }
+  function togglePreview() { setPreviewEnabled(!previewEnabled); }
 
   // ---- presence ----------------------------------------------------------
   function renderPresence() {
@@ -394,7 +420,7 @@
     if (s && msg) s.textContent = msg;
   }
 
-  // ---- UI wiring for tree buttons ----------------------------------------
+  // ---- UI wiring for tree + preview buttons ------------------------------
   function wireControls() {
     const nf = el("btn-new-file");
     const nd = el("btn-new-dir");
@@ -406,6 +432,14 @@
       const name = window.prompt("New folder name", "folder");
       if (name && name.trim()) createDir(name.trim(), "");
     });
+    // Preview on/off (persisted preference). The topbar button toggles it; the
+    // ✕ in the preview header disables it.
+    try { if (localStorage.getItem("scriptorium-preview") === "0") previewEnabled = false; } catch (_) { /* private mode */ }
+    const pv = el("btn-preview");
+    if (pv) pv.addEventListener("click", togglePreview);
+    const pvc = el("btn-preview-close");
+    if (pvc) pvc.addEventListener("click", () => setPreviewEnabled(false));
+    updatePreviewToggle(null);
   }
 
   // ---- AI assistant file API ---------------------------------------------
