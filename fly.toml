@@ -2,7 +2,7 @@
 # session pairing in memory, and session-affinity routing (flyaffinity) pins
 # a workspace's clients to one machine. Document content lives in peer Yjs
 # docs (and, later, encrypted in Tigris) — never on this server in plaintext.
-app = "scriptorium"
+app = "scriptorium-edit"
 primary_region = "jnb"
 
 [build]
