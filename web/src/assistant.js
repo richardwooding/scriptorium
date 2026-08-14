@@ -69,6 +69,18 @@
       schema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] } },
     { name: "create_file", description: "Create a new file (errors if it already exists). Intermediate folders are created.",
       schema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path"] } },
+    { name: "write_files", description: "Create or overwrite MULTIPLE files in one step — the fastest way to scaffold a project or feature. Prefer this when adding several files at once.",
+      schema: { type: "object", properties: {
+        files: { type: "array", items: { type: "object", properties: {
+          path: { type: "string" }, content: { type: "string" },
+        }, required: ["path", "content"] } },
+      }, required: ["files"] } },
+    { name: "search", description: "Find text across all text files in the workspace (case-insensitive substring, or a regular expression). Use this to locate code before editing.",
+      schema: { type: "object", properties: { query: { type: "string" }, regex: { type: "boolean" } }, required: ["query"] } },
+    { name: "make_dir", description: "Create an (empty) folder, including any parent folders.",
+      schema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
+    { name: "move_file", description: "Move or rename a file/folder to a new path.",
+      schema: { type: "object", properties: { path: { type: "string" }, new_path: { type: "string" } }, required: ["path", "new_path"] } },
     { name: "rename_file", description: "Rename or move a file/folder to a new path.",
       schema: { type: "object", properties: { path: { type: "string" }, new_path: { type: "string" } }, required: ["path", "new_path"] } },
     { name: "delete_file", description: "Delete a file or folder (recursive).",
@@ -116,6 +128,17 @@
           a.activity({ file: p.path });
           const r = a.create(p.path, p.content); a.focus(p.path); actions.push(r); logAction(r); return { output: r };
         }
+        case "write_files": {
+          const files = p.files || [];
+          const last = files.length ? files[files.length - 1].path : null;
+          if (last) a.activity({ file: last });
+          const r = a.writeMany(files); if (last) a.focus(last); actions.push(r); logAction(r); return { output: r };
+        }
+        case "search": return { output: JSON.stringify(a.search(p.query, { regex: p.regex })) };
+        case "make_dir": {
+          const r = a.mkdir(p.path); actions.push(r); logAction(r); return { output: r };
+        }
+        case "move_file":
         case "rename_file": {
           a.activity({ file: p.new_path });
           const r = a.rename(p.path, p.new_path); actions.push(r); logAction(r); return { output: r };
@@ -288,12 +311,27 @@
     const tree = W.ai.list().map((f) => (f.kind === "dir" ? "📁 " : (f.bin ? "🖼 " : "   ")) + f.path + (f.bin ? "  [binary: " + f.mime + "]" : "")).join("\n");
     return [
       "You are an AI assistant embedded in scriptorium, a live collaborative editor.",
-      "You read and edit files in the shared workspace with the provided tools.",
+      "You have FULL WRITE ACCESS to the shared workspace — use it.",
+      "",
+      "Be a doer, not a describer. When the user asks you to build, add, scaffold,",
+      "implement, fix, or refactor something, DO it by creating and editing real",
+      "files with your tools — do NOT paste code into chat and do NOT ask permission",
+      "for obvious file work. Act when the intent is clear.",
+      "Prefer real files over description: if a request implies new files (a module,",
+      "config, test, example, or doc), create them. Use write_files to scaffold",
+      "several at once. Add helpful supporting files (a README, an example) when it",
+      "genuinely helps, but keep it proportional to the request.",
+      "",
+      "Working style: use search to locate things before editing. Read a file before",
+      "editing it. Prefer minimal edit_file (exact find/replace) for changes to",
+      "existing files; use write_file/create_file/write_files for new content. Use",
+      "human paths like \"src/main.go\". Every one of your turns is a single undo step",
+      "for the user, so it's safe to make the changes.",
       "Edits apply IMMEDIATELY and are seen live by every collaborator — be precise.",
-      "Read a file before editing it. Prefer minimal edit_file (exact find/replace)",
-      "over write_file. Use human paths like \"src/main.go\". Keep replies concise.",
+      "Reply BRIEFLY: the code lives in the files; your chat message is just a short",
+      "summary of what you did or found.",
       "Files marked [binary] cannot be read or edited as text; for images use",
-      "view_image to actually see them. You can still rename/delete/open binaries.",
+      "view_image to actually see them. You can still rename/delete/move/open binaries.",
       "",
       "Workspace files:",
       tree || "(empty workspace)",

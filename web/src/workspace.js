@@ -693,6 +693,71 @@
     openFile(id);
     return "focused " + path;
   }
+  // Grep across text files (skip dirs + binaries). Case-insensitive substring by
+  // default, or a RegExp when opts.regex. Capped + trimmed to bound token cost.
+  function fsSearch(query, opts) {
+    if (!query) return { matches: [], truncated: false };
+    const MAX = 100, SNIP = 200;
+    let re = null;
+    if (opts && opts.regex) { try { re = new RegExp(query, "i"); } catch (_) { re = null; } }
+    const needle = String(query).toLowerCase();
+    const matches = [];
+    let truncated = false;
+    meta.forEach((n, id) => {
+      if (truncated || n.kind !== "file" || isBinNode(n)) return;
+      const t = contents.get(id);
+      if (!t) return;
+      const path = idToPath(id);
+      const lines = t.toString().split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        const hit = re ? re.test(lines[i]) : lines[i].toLowerCase().includes(needle);
+        if (!hit) continue;
+        if (matches.length >= MAX) { truncated = true; break; }
+        const s = lines[i];
+        matches.push({ path, line: i + 1, text: s.length > SNIP ? s.slice(0, SNIP) + "…" : s });
+      }
+    });
+    return { matches, truncated };
+  }
+  // Batch create/overwrite text files in ONE transaction — a single undo unit.
+  function fsWriteMany(files) {
+    if (!Array.isArray(files) || files.length === 0) throw new Error("no files provided");
+    const names = [];
+    doc.transact(() => {
+      for (const f of files) {
+        const path = f && f.path;
+        if (!path) throw new Error("each file needs a path");
+        const content = f.content != null ? f.content : "";
+        let id = pathToId(path);
+        if (!id) id = createFile(leafName(path), ensureParent(path));
+        else if (meta.get(id).kind !== "file") throw new Error("not a file: " + path);
+        else if (isBinNode(meta.get(id))) throw new Error("binary file (cannot overwrite as text): " + path);
+        const t = contents.get(id);
+        if (t.length) t.delete(0, t.length);
+        if (content) t.insert(0, content);
+        names.push(path);
+      }
+    }, AI_ORIGIN);
+    return "wrote " + names.length + " file" + (names.length === 1 ? "" : "s") + ": " + names.join(", ");
+  }
+  // Create an (empty) directory chain; error if a segment exists as a file.
+  function fsMkdir(path) {
+    const parts = splitPath(path);
+    if (!parts.length) throw new Error("empty path");
+    doc.transact(() => {
+      let parent = "";
+      for (const seg of parts) {
+        const existing = childrenOf(parent).find((cid) => meta.get(cid).name === seg);
+        if (existing !== undefined) {
+          if (meta.get(existing).kind !== "dir") throw new Error("a file already exists at: " + seg);
+          parent = existing;
+        } else {
+          parent = createDir(seg, parent);
+        }
+      }
+    }, AI_ORIGIN);
+    return "created folder " + parts.join("/");
+  }
 
   // ---- binary files ------------------------------------------------------
   const MAX_BLOB = 5 * 1024 * 1024;         // 5 MiB per file
@@ -799,6 +864,7 @@
     ai: {
       list: fsList, read: fsRead, edit: fsEdit, write: fsWrite,
       create: fsCreate, rename: fsRename, remove: fsDelete, focus: fsFocus,
+      search: fsSearch, writeMany: fsWriteMany, mkdir: fsMkdir,
       checkpoint: aiCheckpoint, undo: aiUndoTurn, activity: setAIActivity,
     },
   };
