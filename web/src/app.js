@@ -177,6 +177,13 @@
     el("join-phrase").addEventListener("input", refreshAction);
     el("btn-action").addEventListener("click", doAction);
     el("btn-invite").addEventListener("click", openInvite);
+    el("btn-download").addEventListener("click", async () => {
+      if (!window.Download) return;
+      try {
+        const r = await Download.saveZip();
+        toast(r.fileCount ? "downloaded " + r.name : "nothing to download yet");
+      } catch (e) { toast("download failed: " + (e && e.message ? e.message : e)); }
+    });
     el("btn-close-invite").addEventListener("click", closeInvite);
     el("btn-copy-link").addEventListener("click", () => copy(shareLink, "link copied"));
     el("btn-copy-phrase").addEventListener("click", () => copy(phrase, "phrase copied"));
