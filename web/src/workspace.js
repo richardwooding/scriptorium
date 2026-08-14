@@ -38,8 +38,9 @@
 
   // ---- state -------------------------------------------------------------
   let doc = null;          // the Y.Doc
-  let meta = null;         // Y.Map: fileId → {name, parent, kind, order}
-  let contents = null;     // Y.Map: fileId → Y.Text
+  let meta = null;         // Y.Map: fileId → {name, parent, kind, order, bin?, mime?}
+  let contents = null;     // Y.Map: fileId → Y.Text (text files)
+  let blobs = null;        // Y.Map: fileId → Uint8Array (binary files)
   let awareness = null;
   let send = () => {};     // bridge send, injected by app.js
   let self = { name: "anon", color: "#a371f7", host: false };
@@ -51,13 +52,16 @@
   let aiUndo = null;       // Y.UndoManager scoped to origin "ai" (assistant edits)
   let previewEnabled = true; // user toggle for the preview pane (persisted)
   let huddleObserver = null; // huddle.js callback: who's in the voice huddle
+  let binURL = null;         // object URL of the currently-shown binary viewer
 
   // ---- lifecycle ---------------------------------------------------------
   function reset() {
     if (editor) { editor.destroy(); editor = null; }
+    revokeBinURL();
     doc = new Y.Doc();
     meta = doc.getMap("meta");
     contents = doc.getMap("contents");
+    blobs = doc.getMap("blobs"); // binary file bytes; rides the same @ws stream
     awareness = new Awareness(doc);
     // Undo scoped to the AI assistant: tracks only "ai"-origin changes to the
     // tree and every file's Y.Text (descendants of `contents`), so "undo this
@@ -185,10 +189,12 @@
       childrenOf(id).forEach((c) => deleteNode(c));
     } else {
       contents.delete(id);
+      blobs.delete(id); // no-op for text files; frees binary bytes
     }
     meta.delete(id);
     closeTab(id);
   }
+  const isBinNode = (n) => !!(n && n.bin);
   function childrenOf(parent) {
     const out = [];
     meta.forEach((n, id) => { if (n.parent === parent) out.push(id); });
@@ -285,7 +291,7 @@
     if (activeId === id) {
       activeId = openTabs[openTabs.length - 1] || null;
       if (activeId) mountEditor(activeId);
-      else if (editor) { editor.destroy(); editor = null; el("editor-host").textContent = ""; }
+      else { if (editor) { editor.destroy(); editor = null; } revokeBinURL(); el("editor-host").textContent = ""; }
     }
     renderTabs();
     updateEmptyHint();
@@ -322,16 +328,68 @@
     const host = el("editor-host");
     if (!host) return;
     if (editor) { editor.destroy(); editor = null; }
+    revokeBinURL();
     host.textContent = "";
+    const n = meta.get(id);
+    if (isBinNode(n)) { mountBinaryViewer(host, id, n); return; }
     const ytext = contents.get(id);
     if (!ytext) return;
-    const n = meta.get(id);
     editor = window.CMEditor.create({
       parent: host,
       ytext,
       awareness,
       path: n ? n.name : "",
     });
+  }
+  function revokeBinURL() { if (binURL) { URL.revokeObjectURL(binURL); binURL = null; } }
+  // Render a binary file in the editor pane: native <img>/<iframe>/<audio>/<video>
+  // for previewable types, else a filename/size card. Always offers a download.
+  function mountBinaryViewer(host, id, n) {
+    const bytes = blobs.get(id) || new Uint8Array(0);
+    const mime = n.mime || mimeFromName(n.name);
+    binURL = URL.createObjectURL(new Blob([bytes], { type: mime }));
+    const wrap = document.createElement("div");
+    wrap.className = "bin-view";
+    let media = null;
+    if (mime.startsWith("image/")) {
+      media = document.createElement("img");
+      media.className = "bin-media"; media.alt = n.name; media.src = binURL;
+    } else if (mime === "application/pdf") {
+      media = document.createElement("iframe");
+      media.className = "bin-media bin-frame"; media.src = binURL; media.title = n.name;
+    } else if (mime.startsWith("audio/") || mime.startsWith("video/")) {
+      media = document.createElement(mime.startsWith("audio/") ? "audio" : "video");
+      media.className = "bin-media"; media.controls = true; media.src = binURL;
+    }
+    if (media) wrap.appendChild(media);
+    const card = document.createElement("div");
+    card.className = "bin-card gl-hint";
+    const kb = (bytes.length / 1024).toFixed(bytes.length < 102400 ? 1 : 0);
+    const label = document.createElement("div");
+    label.textContent = iconFor(n.name) + " " + n.name + " · " + mime + " · " + kb + " KB";
+    const dl = document.createElement("button");
+    dl.className = "gl-btn ghost"; dl.textContent = "⇩ Download this file";
+    dl.addEventListener("click", () => {
+      const u = URL.createObjectURL(new Blob([bytes], { type: mime }));
+      const a = document.createElement("a"); a.href = u; a.download = n.name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(u), 1000);
+    });
+    card.appendChild(label); card.appendChild(dl);
+    wrap.appendChild(card);
+    host.appendChild(wrap);
+  }
+  // Minimal extension→mime fallback when the upload gave no type.
+  function mimeFromName(name) {
+    const ext = (name.split(".").pop() || "").toLowerCase();
+    const M = {
+      png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+      webp: "image/webp", svg: "image/svg+xml", bmp: "image/bmp", ico: "image/x-icon",
+      pdf: "application/pdf", mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg",
+      m4a: "audio/mp4", mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime",
+      zip: "application/zip",
+    };
+    return M[ext] || "application/octet-stream";
   }
   function updateEmptyHint() {
     const hint = el("empty-hint");
@@ -463,6 +521,23 @@
       const name = window.prompt("New folder name", "folder");
       if (name && name.trim()) createDir(name.trim(), "");
     });
+    // Upload: button opens the hidden file input; dropping files onto the tree or
+    // editor imports them too. importFiles decides text-vs-binary per file.
+    const up = el("btn-upload"), fi = el("file-input");
+    if (up && fi) {
+      up.addEventListener("click", () => fi.click());
+      fi.addEventListener("change", async () => { await importFiles(fi.files, ""); fi.value = ""; });
+    }
+    for (const zoneId of ["tree-pane", "editor-host"]) {
+      const zone = el(zoneId) || document.querySelector("." + zoneId);
+      if (!zone) continue;
+      zone.addEventListener("dragover", (e) => { e.preventDefault(); zone.classList.add("drop-hot"); });
+      zone.addEventListener("dragleave", () => zone.classList.remove("drop-hot"));
+      zone.addEventListener("drop", async (e) => {
+        e.preventDefault(); zone.classList.remove("drop-hot");
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) await importFiles(e.dataTransfer.files, "");
+      });
+    }
     // Preview on/off (persisted preference). The topbar button toggles it; the
     // ✕ in the preview header disables it.
     try { if (localStorage.getItem("scriptorium-preview") === "0") previewEnabled = false; } catch (_) { /* private mode */ }
@@ -528,19 +603,29 @@
     if (meta.get(id).kind !== "file") throw new Error("not a file: " + path);
     return id;
   }
+  // Text-only guard: refuse binary files so the AI can't read/edit bytes as text.
+  function requireTextFile(path) {
+    const id = requireFile(path);
+    if (isBinNode(meta.get(id))) throw new Error("binary file (cannot read/edit as text): " + path);
+    return id;
+  }
 
   function fsList() {
     const out = [];
-    meta.forEach((n, id) => out.push({ path: idToPath(id), kind: n.kind }));
+    meta.forEach((n, id) => {
+      const e = { path: idToPath(id), kind: n.kind };
+      if (n.bin) { e.bin = true; e.mime = n.mime || mimeFromName(n.name); }
+      out.push(e);
+    });
     out.sort((a, b) => a.path.localeCompare(b.path));
     return out;
   }
   function fsRead(path) {
-    const t = contents.get(requireFile(path));
+    const t = contents.get(requireTextFile(path));
     return t ? t.toString() : "";
   }
   function fsEdit(path, edits) {
-    const t = contents.get(requireFile(path));
+    const t = contents.get(requireTextFile(path));
     if (!Array.isArray(edits) || edits.length === 0) throw new Error("no edits provided");
     let count = 0;
     doc.transact(() => {
@@ -571,6 +656,7 @@
       let id = pathToId(path);
       if (!id) id = createFile(leafName(path), ensureParent(path));
       else if (meta.get(id).kind !== "file") throw new Error("not a file: " + path);
+      else if (isBinNode(meta.get(id))) throw new Error("binary file (cannot overwrite as text): " + path);
       const t = contents.get(id);
       if (t.length) t.delete(0, t.length);
       if (content) t.insert(0, content);
@@ -608,6 +694,87 @@
     return "focused " + path;
   }
 
+  // ---- binary files ------------------------------------------------------
+  const MAX_BLOB = 5 * 1024 * 1024;         // 5 MiB per file
+  const MAX_TOTAL = 24 * 1024 * 1024;       // keep whole-state well under the 32 MiB catch-up ceiling
+  const TEXT_EXTS = ["txt", "md", "markdown", "js", "mjs", "cjs", "jsx", "ts", "tsx",
+    "json", "yaml", "yml", "toml", "html", "htm", "css", "go", "py", "rs", "sh",
+    "bash", "zsh", "c", "h", "cpp", "hpp", "java", "rb", "php", "sql", "xml", "csv",
+    "ini", "cfg", "conf", "env", "gitignore", "lock", "log"];
+
+  // Store raw bytes as a binary file (create or replace). Enforces the per-file
+  // cap and the whole-workspace budget so late-join catch-up stays under 32 MiB.
+  function putBinary(path, bytes, mime) {
+    bytes = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || 0);
+    if (bytes.length > MAX_BLOB) {
+      throw new Error("file too large (" + (bytes.length / 1048576).toFixed(1) + " MiB); max is 5 MiB");
+    }
+    const existing = pathToId(path);
+    const prev = existing ? (blobs.get(existing) ? blobs.get(existing).length : 0) : 0;
+    const total = Y.encodeStateAsUpdate(doc).length - prev + bytes.length;
+    if (total > MAX_TOTAL) {
+      throw new Error("workspace is near its size limit — remove some files first");
+    }
+    doc.transact(() => {
+      let id = existing;
+      if (!id) {
+        id = uuid();
+        meta.set(id, { name: leafName(path), parent: ensureParent(path), kind: "file", order: meta.size, bin: true, mime: mime || mimeFromName(path) });
+      } else {
+        contents.delete(id); // in case it was a text file being replaced
+        meta.set(id, Object.assign({}, meta.get(id), { bin: true, mime: mime || mimeFromName(path) }));
+      }
+      blobs.set(id, bytes);
+    });
+    return { path, bytes: bytes.length };
+  }
+  // Raw bytes for any file: binary blobs as-is, text files UTF-8 encoded.
+  function readBytes(path) {
+    const id = requireFile(path);
+    const n = meta.get(id);
+    if (isBinNode(n)) return blobs.get(id) || new Uint8Array(0);
+    const t = contents.get(id);
+    return new TextEncoder().encode(t ? t.toString() : "");
+  }
+  const looksTextual = (name, mime) => {
+    if (mime && mime.startsWith("text/")) return true;
+    const ext = (name.split(".").pop() || "").toLowerCase();
+    return TEXT_EXTS.includes(ext);
+  };
+  // Upload handler: import File objects — valid-UTF-8 text becomes an editable
+  // Y.Text file; everything else becomes a view-only binary blob.
+  async function importFiles(fileList, parent) {
+    const files = Array.from(fileList || []);
+    let lastId = null, errs = [];
+    for (const f of files) {
+      try {
+        const buf = new Uint8Array(await f.arrayBuffer());
+        const path = (parent ? parent + "/" : "") + f.name;
+        if (looksTextual(f.name, f.type) && buf.length <= MAX_BLOB) {
+          let text = null;
+          try { text = new TextDecoder("utf-8", { fatal: true }).decode(buf); } catch (_) { text = null; }
+          if (text != null) {
+            doc.transact(() => {
+              let id = pathToId(path);
+              if (!id) id = createFile(leafName(path), ensureParent(path));
+              const t = contents.get(id);
+              if (t && t.length) t.delete(0, t.length);
+              if (text) contents.get(id).insert(0, text);
+              lastId = id;
+            });
+            continue;
+          }
+        }
+        putBinary(path, buf, f.type);
+        lastId = pathToId(path);
+      } catch (e) {
+        errs.push(f.name + ": " + (e && e.message ? e.message : e));
+      }
+    }
+    if (lastId) openFile(lastId);
+    return { errors: errs };
+  }
+
   function aiCheckpoint() { if (aiUndo) aiUndo.stopCapturing(); }
   function aiUndoTurn() {
     if (!aiUndo) return false;
@@ -626,6 +793,8 @@
     renderPresence, removePeer,
     // huddle voice-chat membership (huddle.js)
     setHuddle, registerHuddleObserver,
+    // binary files: upload/store/read raw bytes (used by uploads, download.js, assistant.js)
+    putBinary, readBytes, importFiles,
     // AI assistant surface (assistant.js)
     ai: {
       list: fsList, read: fsRead, edit: fsEdit, write: fsWrite,

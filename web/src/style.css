@@ -79,6 +79,15 @@
 .tab:focus-visible { outline: 2px solid var(--gl-accent); outline-offset: -2px; }
 .editor-host { flex: 1; overflow: auto; min-height: 0; }
 .editor-host .cm-editor { height: 100%; }
+
+/* ---- binary file viewer ---------------------------------------------- */
+.bin-view { height: 100%; display: flex; flex-direction: column; align-items: center; gap: .75rem; padding: 1rem; box-sizing: border-box; overflow: auto; }
+.bin-media { max-width: 100%; max-height: 70%; object-fit: contain; border-radius: 8px; background: var(--gl-panel); }
+.bin-frame { width: 100%; height: 70%; border: 1px solid var(--gl-border); }
+video.bin-media, audio.bin-media { width: 100%; }
+.bin-card { display: flex; flex-direction: column; align-items: center; gap: .6rem; text-align: center; }
+/* drag-and-drop upload target */
+.drop-hot { outline: 2px dashed var(--gl-accent); outline-offset: -6px; background: color-mix(in srgb, var(--gl-accent) 8%, transparent); }
 .empty-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
 
 /* ---- preview --------------------------------------------------------- */

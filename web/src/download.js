@@ -107,7 +107,6 @@
   // Collect the workspace into zip entries (files + explicit dir entries so
   // empty folders survive).
   function collect() {
-    const enc = new TextEncoder();
     const W = window.Workspace;
     if (!W || !W.ai) return [];
     const entries = [];
@@ -117,9 +116,11 @@
       if (node.kind === "dir") {
         entries.push({ name: name + "/", bytes: new Uint8Array(0) });
       } else {
-        let text = "";
-        try { text = W.ai.read(node.path); } catch (_) { text = ""; }
-        entries.push({ name, bytes: enc.encode(text) });
+        // readBytes returns raw bytes for binary files and UTF-8 for text — one
+        // path, so binaries zip losslessly.
+        let bytes;
+        try { bytes = W.readBytes(node.path); } catch (_) { bytes = new Uint8Array(0); }
+        entries.push({ name, bytes });
       }
     }
     return entries;

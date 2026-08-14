@@ -1,6 +1,6 @@
 // scriptorium service worker: fast repeat loads, never stale deploys, and the
 // relay WebSocket is never intercepted. No push handling — scriptorium has none.
-const CACHE = "scriptorium-shell-v6";
+const CACHE = "scriptorium-shell-v7";
 const SHELL = [
   "/", "/index.html", "/app.js", "/workspace.js", "/assistant.js", "/huddle.js", "/download.js", "/style.css",
   "/markdown.bundle.js", "/editor.bundle.js",

@@ -75,9 +75,17 @@
       schema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { name: "open_file", description: "Open a file in the editor so the user can watch changes.",
       schema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
+    { name: "view_image", description: "Look at an image file — attaches it so you can actually see it. Only works for image files (png/jpg/gif/webp/svg/…), not other binaries or text.",
+      schema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
   ];
 
-  // Execute one tool call against the Workspace. Returns { output, isError }.
+  const b64FromBytes = (bytes) => {
+    let s = "";
+    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
+  };
+
+  // Execute one tool call against the Workspace. Returns { output, isError, image? }.
   function execTool(tc, actions) {
     const a = W.ai;
     const p = tc.input || {};
@@ -85,6 +93,17 @@
       switch (tc.name) {
         case "list_files": return { output: JSON.stringify(a.list()) };
         case "read_file": return { output: a.read(p.path) };
+        case "view_image": {
+          const node = a.list().find((f) => f.path === p.path);
+          if (!node) return { output: "no such file: " + p.path, isError: true };
+          if (!node.bin || !(node.mime || "").startsWith("image/")) {
+            return { output: "not an image: " + p.path + (node.bin ? " (" + node.mime + ")" : " (text file)"), isError: true };
+          }
+          const bytes = W.readBytes(p.path);
+          if (bytes.length > 5 * 1024 * 1024) return { output: "image too large to view: " + p.path, isError: true };
+          a.focus(p.path);
+          return { output: "Viewing " + p.path + " (" + node.mime + ")", image: { mime: node.mime, b64: b64FromBytes(bytes) } };
+        }
         case "edit_file": {
           a.activity({ file: p.path });
           const r = a.edit(p.path, p.edits); a.focus(p.path); actions.push(r); logAction(r); return { output: r };
@@ -125,9 +144,16 @@
         for (const tc of m.toolCalls || []) content.push({ type: "tool_use", id: tc.id, name: tc.name, input: tc.input });
         return { role: "assistant", content };
       }
-      return { role: "user", content: (m.results || []).map((r) => ({
-        type: "tool_result", tool_use_id: r.id, content: r.output, is_error: r.isError || undefined,
-      })) };
+      return { role: "user", content: (m.results || []).map((r) => {
+        // Anthropic tool_result can carry an image block alongside text.
+        if (r.image) {
+          return { type: "tool_result", tool_use_id: r.id, content: [
+            { type: "text", text: r.output || "" },
+            { type: "image", source: { type: "base64", media_type: r.image.mime, data: r.image.b64 } },
+          ] };
+        }
+        return { type: "tool_result", tool_use_id: r.id, content: r.output, is_error: r.isError || undefined };
+      }) };
     });
   }
   function toOpenAI(hist, system) {
@@ -143,7 +169,16 @@
         }
         out.push(msg);
       } else {
-        for (const r of m.results || []) out.push({ role: "tool", tool_call_id: r.id, content: r.output });
+        for (const r of m.results || []) {
+          out.push({ role: "tool", tool_call_id: r.id, content: r.output });
+          // OpenAI tool messages are text-only; attach any image as a following user turn.
+          if (r.image) {
+            out.push({ role: "user", content: [
+              { type: "text", text: "(image from view_image)" },
+              { type: "image_url", image_url: { url: "data:" + r.image.mime + ";base64," + r.image.b64 } },
+            ] });
+          }
+        }
       }
     }
     return out;
@@ -250,13 +285,15 @@
   }
 
   function buildSystem() {
-    const tree = W.ai.list().map((f) => (f.kind === "dir" ? "📁 " : "   ") + f.path).join("\n");
+    const tree = W.ai.list().map((f) => (f.kind === "dir" ? "📁 " : (f.bin ? "🖼 " : "   ")) + f.path + (f.bin ? "  [binary: " + f.mime + "]" : "")).join("\n");
     return [
       "You are an AI assistant embedded in scriptorium, a live collaborative editor.",
       "You read and edit files in the shared workspace with the provided tools.",
       "Edits apply IMMEDIATELY and are seen live by every collaborator — be precise.",
       "Read a file before editing it. Prefer minimal edit_file (exact find/replace)",
       "over write_file. Use human paths like \"src/main.go\". Keep replies concise.",
+      "Files marked [binary] cannot be read or edited as text; for images use",
+      "view_image to actually see them. You can still rename/delete/open binaries.",
       "",
       "Workspace files:",
       tree || "(empty workspace)",
@@ -320,7 +357,7 @@
         const results = [];
         for (const tc of toolCalls) {
           const out = execTool(tc, actions);
-          results.push({ id: tc.id, name: tc.name, output: out.output, isError: out.isError });
+          results.push({ id: tc.id, name: tc.name, output: out.output, isError: out.isError, image: out.image });
         }
         history.push({ role: "tool", results });
       }
