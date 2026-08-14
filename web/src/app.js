@@ -99,7 +99,9 @@
     enterWorkspace(true);
     setInvite(e.phrase, e.url, e.qr);
     history.replaceState({ phrase }, "", "#" + phrase);
-    openInvite(); // first-run nudge to share
+    // Fresh workspace → nudge to share. Reopened (re-hosted a known phrase) →
+    // the user already has the phrase; just confirm, and cloud restore runs.
+    if (e.reopened) toast("workspace reopened"); else openInvite();
   }
   function onJoined(e) {
     selfId = e.self >>> 0;

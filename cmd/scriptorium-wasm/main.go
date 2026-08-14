@@ -208,6 +208,13 @@ func create(name string) {
 		emitError("couldn't start a workspace: " + err.Error())
 		return
 	}
+	emitHosted(client, phrase, name, false)
+}
+
+// emitHosted wires up a hosted client and announces it to the UI. reopened
+// distinguishes re-hosting a known phrase (whose cloud snapshot the host will
+// restore) from a brand-new workspace.
+func emitHosted(client *session.Client, phrase, name string, reopened bool) {
 	start(client, name)
 	url := shareURL(phrase)
 	qr := ""
@@ -215,7 +222,29 @@ func create(name string) {
 		qr = base64.StdEncoding.EncodeToString(png)
 	}
 	sid, cloudKey := cloudMaterial(phrase)
-	emit("session.created", map[string]any{"phrase": phrase, "url": url, "qr": qr, "self": uint32(client.Self()), "sid": sid, "cloudKey": cloudKey})
+	emit("session.created", map[string]any{
+		"phrase": phrase, "url": url, "qr": qr, "self": uint32(client.Self()),
+		"sid": sid, "cloudKey": cloudKey, "reopened": reopened,
+	})
+}
+
+// reopenAsHost re-hosts a known phrase whose live session has ended, so the host
+// can restore its persisted (encrypted) cloud snapshot. Used as the fallback
+// when a join finds no live session for the phrase.
+func reopenAsHost(phrase, name string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	client, err := session.HostWithPhrase(ctx, relayURL(), phrase, proto.Options()...)
+	if err != nil {
+		// Race: someone created the session between our join and host — join it.
+		if strings.Contains(err.Error(), "exists") {
+			join(phrase, name)
+			return
+		}
+		emitError("couldn't reopen the workspace: " + err.Error())
+		return
+	}
+	emitHosted(client, phrase, name, true)
 }
 
 func join(phrase, name string) {
@@ -228,10 +257,14 @@ func join(phrase, name string) {
 	defer cancel()
 	client, err := session.Join(ctx, relayURL(), phrase, proto.Options()...)
 	if err != nil {
+		// No live session for this phrase → reopen it as host (restores any
+		// persisted cloud snapshot, else starts fresh).
+		if strings.Contains(err.Error(), "not found") {
+			reopenAsHost(phrase, name)
+			return
+		}
 		msg := "couldn't join: " + err.Error()
 		switch {
-		case strings.Contains(err.Error(), "not found"):
-			msg = "no workspace with that phrase — check for typos"
 		case strings.Contains(err.Error(), "unwrap"):
 			msg = "wrong phrase"
 		case strings.Contains(err.Error(), "full"):
