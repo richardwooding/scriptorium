@@ -87,6 +87,12 @@
       if (origin === REMOTE) return;
       send({ type: "doc.update", fileID: WS, update: b64encode(update) });
     });
+    // Cloud autosave (host only): the host is the single writer that persists
+    // the whole merged doc — so this fires on ANY change, including REMOTE peer
+    // edits, so peers' work is saved too. Debounced + gated inside window.Cloud.
+    doc.on("update", () => {
+      if (self.host && window.Cloud) window.Cloud.scheduleSave(() => Y.encodeStateAsUpdate(doc));
+    });
     awareness.on("update", ({ added, updated, removed }, origin) => {
       if (origin === REMOTE) return;
       const changed = added.concat(updated, removed);
@@ -118,6 +124,24 @@
   }
   function getWorkspaceName() {
     return (settings && settings.get("name")) || "";
+  }
+
+  // cloudRestore (host-on-open): fetch+decrypt the stored snapshot via window.Cloud
+  // and merge it into the doc with the REMOTE origin (so the broadcaster/autosave
+  // don't treat it as a fresh local edit). Returns true if state was applied,
+  // false when there's nothing stored / cloud is dormant / Cloud is absent — the
+  // caller then falls back to seedIfEmpty. Never throws (persistence is optional).
+  async function cloudRestore() {
+    if (!window.Cloud) return false;
+    try {
+      const bytes = await window.Cloud.restore();
+      if (bytes && bytes.length) {
+        Y.applyUpdate(doc, bytes, REMOTE);
+        renderTree(); renderTabs(); updateEmptyHint();
+        return true;
+      }
+    } catch (_) { /* fall back to a fresh/seeded workspace */ }
+    return false;
   }
 
   function setSend(fn) { send = fn; }
@@ -892,6 +916,8 @@
     renderPresence, removePeer,
     // shared workspace name (topbar field, download.js)
     setName: setWorkspaceName, getName: getWorkspaceName,
+    // cloud sync: host restores an encrypted snapshot on open (cloud.js)
+    cloudRestore,
     // huddle voice-chat membership (huddle.js)
     setHuddle, registerHuddleObserver,
     // binary files: upload/store/read raw bytes (used by uploads, download.js, assistant.js)

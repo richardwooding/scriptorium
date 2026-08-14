@@ -17,8 +17,12 @@ design as its sibling [confab](https://github.com/richardwooding/confab).
 - **E2EE** — edits are encrypted client-side; the relay forwards opaque frames.
 - **Multi-file** — a tree of files/folders; highlight by extension; live
   markdown preview.
-- **Ephemeral by default** — a workspace lives while someone's connected;
-  optional encrypted cloud sync (Tigris) is a follow-up so workspaces persist.
+- **Ephemeral by default, optionally persistent** — a workspace lives while
+  someone's connected; enable **E2EE-at-rest cloud sync** (Tigris) and the host
+  autosaves an encrypted snapshot that's restored on reopen. The store only ever
+  holds ciphertext — the key is derived from the phrase in the browser and never
+  leaves it (see [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md)). Dormant until the
+  operator configures an object store.
 - **Optional AI assistant** — bring your own key (Anthropic Console, or any
   OpenAI-compatible endpoint) and let it read and edit files on your behalf.
   It runs in your browser and talks to your provider directly; content you share

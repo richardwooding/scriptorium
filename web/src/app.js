@@ -65,8 +65,15 @@
     Workspace.setSelf({ name: nameInput() || "anon", color: colorFor(selfId), pid: selfId });
     Workspace.setHost(isHost);
     showWorkspace();
-    if (isHost) Workspace.seedIfEmpty();
-    else el("home-status").textContent = "";
+    if (isHost) {
+      // Host restores an encrypted cloud snapshot (if any) before seeding /
+      // serving catch-up, so peers catch up on the persisted state. seedIfEmpty
+      // is a no-op when the restore populated the doc; it runs when there was
+      // nothing stored (or cloud is dormant).
+      Workspace.cloudRestore().then(function (restored) { if (!restored) Workspace.seedIfEmpty(); });
+    } else {
+      el("home-status").textContent = "";
+    }
     // The AI assistant is a local, browser-only feature: it talks to the user's
     // own provider directly and edits files via Workspace. Fresh per session.
     if (window.Assistant) {
@@ -88,6 +95,7 @@
     hostId = selfId;
     phrase = e.phrase;
     shareLink = e.url;
+    if (window.Cloud) Cloud.configure(e.sid, e.cloudKey);
     enterWorkspace(true);
     setInvite(e.phrase, e.url, e.qr);
     history.replaceState({ phrase }, "", "#" + phrase);
@@ -95,6 +103,7 @@
   }
   function onJoined(e) {
     selfId = e.self >>> 0;
+    if (window.Cloud) Cloud.configure(e.sid, e.cloudKey);
     enterWorkspace(false);
     if (!location.hash) history.replaceState({ phrase: joinedPhrase() }, "", "#" + joinedPhrase());
     el("home-status").textContent = "catching up…";

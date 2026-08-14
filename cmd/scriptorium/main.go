@@ -21,6 +21,7 @@ import (
 	"github.com/richardwooding/parley/dashboard"
 	"github.com/richardwooding/parley/relay"
 	"github.com/richardwooding/parley/wire"
+	"github.com/richardwooding/scriptorium/internal/cloudsign"
 	"github.com/richardwooding/scriptorium/web"
 )
 
@@ -205,6 +206,20 @@ func main() {
 		log.Printf("admin dashboard enabled at /dashboard (%d allowed user(s))", len(cfg.Allow))
 	} else {
 		log.Print("admin dashboard disabled (set DASHBOARD_* env vars to enable)")
+	}
+
+	// Cloud sync (E2EE-at-rest, Tigris) — only wired up when the object-store
+	// creds are present, so it's dormant locally and in the public build. The
+	// endpoint only presigns URLs; ciphertext never passes through this server.
+	if cfg, ok := cloudsign.ConfigFromEnv(); ok {
+		h, err := cloudsign.New(cfg)
+		if err != nil {
+			log.Fatalf("cloud sync: %v", err)
+		}
+		h.Register(mux)
+		log.Printf("cloud sync enabled (bucket %q via %s)", cfg.Bucket, cfg.Endpoint)
+	} else {
+		log.Print("cloud sync disabled (set AWS_*/BUCKET_NAME to enable — e.g. `fly storage create`)")
 	}
 
 	srv := &http.Server{

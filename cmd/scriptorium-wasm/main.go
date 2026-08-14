@@ -12,21 +12,43 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"strings"
 	"sync"
 	"syscall/js"
 	"time"
 
 	qrcode "github.com/skip2/go-qrcode"
+	"golang.org/x/crypto/hkdf"
 
+	"github.com/richardwooding/parley/phrase"
 	"github.com/richardwooding/parley/service"
 	"github.com/richardwooding/parley/session"
 	"github.com/richardwooding/scriptorium/internal/doc"
 	"github.com/richardwooding/scriptorium/internal/huddle"
 	"github.com/richardwooding/scriptorium/internal/proto"
 )
+
+// cloudMaterial derives the two values the browser needs for E2EE-at-rest cloud
+// sync from the code phrase: the SessionID hex (which the relay already knows,
+// used to ask the server to presign this session's object) and a 32-byte
+// at-rest key = HKDF-SHA256(canonical-phrase, info="scriptorium/v1/cloud"),
+// base64-encoded. Deriving from the CANONICAL phrase (as SessionID does) keeps
+// host, joiner, and any promoted writer identical regardless of input casing.
+// The key never leaves the browser; exposing it to JS reveals nothing new (JS
+// already holds the phrase).
+func cloudMaterial(raw string) (sidHex, cloudKeyB64 string) {
+	sid := phrase.SessionID(proto.Label, raw)
+	r := hkdf.New(sha256.New, []byte(phrase.Canonical(raw)), nil, []byte("scriptorium/v1/cloud"))
+	key := make([]byte, 32)
+	if _, err := io.ReadFull(r, key); err != nil {
+		return sid.Hex(), "" // HKDF over sha256 can't fail here; be safe
+	}
+	return sid.Hex(), base64.StdEncoding.EncodeToString(key)
+}
 
 type command struct {
 	Type   string `json:"type"`
@@ -192,7 +214,8 @@ func create(name string) {
 	if png, e := qrcode.Encode(url, qrcode.Medium, 220); e == nil {
 		qr = base64.StdEncoding.EncodeToString(png)
 	}
-	emit("session.created", map[string]any{"phrase": phrase, "url": url, "qr": qr, "self": uint32(client.Self())})
+	sid, cloudKey := cloudMaterial(phrase)
+	emit("session.created", map[string]any{"phrase": phrase, "url": url, "qr": qr, "self": uint32(client.Self()), "sid": sid, "cloudKey": cloudKey})
 }
 
 func join(phrase, name string) {
@@ -218,7 +241,8 @@ func join(phrase, name string) {
 		return
 	}
 	start(client, name)
-	emit("session.joined", map[string]any{"self": uint32(client.Self())})
+	sid, cloudKey := cloudMaterial(phrase)
+	emit("session.joined", map[string]any{"self": uint32(client.Self()), "sid": sid, "cloudKey": cloudKey})
 	if d := currentDoc(); d != nil {
 		_ = d.RequestCatchup()
 	}
