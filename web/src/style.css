@@ -141,6 +141,17 @@ video.bin-media, audio.bin-media { width: 100%; }
 .ai-assistant.streaming::after { content: "▋"; color: var(--gl-accent); margin-left: 1px; }
 .ai-assistant pre { background: var(--gl-panel); padding: .5rem; border-radius: 6px; overflow-x: auto; }
 .ai-assistant code { font-family: ui-monospace, monospace; }
+/* "waiting for the model's first token" indicator (before streaming starts). */
+.ai-thinking { align-self: flex-start; width: max-content; padding: .55rem .7rem; }
+.ai-dots { display: inline-flex; gap: 5px; }
+.ai-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--gl-accent); animation: ai-dot 1.2s infinite ease-in-out both; }
+.ai-dots i:nth-child(2) { animation-delay: .16s; }
+.ai-dots i:nth-child(3) { animation-delay: .32s; }
+@keyframes ai-dot { 0%, 80%, 100% { opacity: .3; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) {
+  .ai-dots i { animation: ai-dot-pulse 1.4s infinite ease-in-out both; }
+  @keyframes ai-dot-pulse { 0%, 80%, 100% { opacity: .3; } 40% { opacity: 1; } }
+}
 .ai-action { font-family: ui-monospace, monospace; font-size: .78rem; color: var(--gl-green, #3fb950); padding: 0 .2rem; }
 .ai-note { font-size: .78rem; color: var(--gl-fg-dim); font-style: italic; padding: 0 .2rem; }
 .ai-error { font-size: .82rem; color: #ff7b72; background: color-mix(in srgb, #ff7b72 12%, transparent); border-radius: 8px; padding: .4rem .6rem; }

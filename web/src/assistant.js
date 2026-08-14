@@ -381,18 +381,26 @@
     W.ai.checkpoint();
     const actions = [];
     let iter = 0;
+    let thinkingEl = null;
+    const clearThinking = () => { if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; } };
     try {
       while (iter++ < MAX_ITERS) {
         if (stopped) { renderNote("stopped"); break; }
         // Stream this step's text into a live bubble; finalize as markdown.
         let streamEl = null, streamText = "";
+        // Show a "thinking" indicator while we wait for the model's first token
+        // (network round-trip + time-to-first-token); removed as soon as text
+        // streams in, or the step returns with no text (e.g. tool-only).
+        thinkingEl = beginThinking();
         const onText = (delta) => {
+          clearThinking();
           if (!streamEl) streamEl = beginAssistant();
           streamText += delta;
           streamEl.textContent = streamText;
           scrollLog();
         };
         const { text, toolCalls } = await callProvider(cfg, buildSystem(), onText);
+        clearThinking();
         if (streamEl) finalizeAssistant(streamEl, streamText);
         else if (text) renderMsg("assistant", text); // non-streamed fallback
         if (stopped) { history.push({ role: "assistant", text, toolCalls: [] }); renderNote("stopped"); break; }
@@ -409,6 +417,7 @@
     } catch (err) {
       renderError(err && err.message ? err.message : String(err));
     } finally {
+      clearThinking();
       W.ai.activity(null);
       if (actions.length) renderUndo(actions.length);
       running = false; setBusy(false);
@@ -424,6 +433,23 @@
     if (role === "assistant" && window.MD) div.innerHTML = window.MD.render(text); // MD sanitizes
     else div.textContent = text;
     log.appendChild(div); scrollLog();
+  }
+  // Animated "waiting for the model's first token" bubble. role=status so
+  // assistive tech announces it; static markup (no user input).
+  function beginThinking() {
+    const log = el("ai-log"); if (!log) return null;
+    const div = document.createElement("div");
+    div.className = "ai-msg ai-assistant ai-thinking";
+    div.setAttribute("role", "status");
+    div.setAttribute("aria-label", "Assistant is thinking");
+    const dots = document.createElement("span");
+    dots.className = "ai-dots";
+    dots.appendChild(document.createElement("i"));
+    dots.appendChild(document.createElement("i"));
+    dots.appendChild(document.createElement("i"));
+    div.appendChild(dots);
+    log.appendChild(div); scrollLog();
+    return div;
   }
   // Live streaming bubble: append empty, fill with plain text as tokens arrive
   // (fast + safe), then re-render as sanitized markdown when the step completes.
