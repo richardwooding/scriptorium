@@ -129,7 +129,9 @@
   function archiveName() {
     let phrase = "";
     try { phrase = safeName(decodeURIComponent((location.hash || "").replace(/^#/, ""))); } catch (_) { phrase = ""; }
-    return "scriptorium-" + (phrase || "workspace") + ".zip";
+    let name = "";
+    try { name = safeName((window.Workspace && window.Workspace.getName && window.Workspace.getName()) || ""); } catch (_) { name = ""; }
+    return "scriptorium-" + (name || phrase || "workspace") + ".zip";
   }
 
   function triggerDownload(blob, name) {

@@ -41,6 +41,7 @@
   let meta = null;         // Y.Map: fileId → {name, parent, kind, order, bin?, mime?}
   let contents = null;     // Y.Map: fileId → Y.Text (text files)
   let blobs = null;        // Y.Map: fileId → Uint8Array (binary files)
+  let settings = null;     // Y.Map: workspace-level shared values (e.g. "name")
   let awareness = null;
   let send = () => {};     // bridge send, injected by app.js
   let self = { name: "anon", color: "#a371f7", host: false };
@@ -62,6 +63,7 @@
     meta = doc.getMap("meta");
     contents = doc.getMap("contents");
     blobs = doc.getMap("blobs"); // binary file bytes; rides the same @ws stream
+    settings = doc.getMap("settings"); // shared workspace-level values (name, …)
     awareness = new Awareness(doc);
     // Undo scoped to the AI assistant: tracks only "ai"-origin changes to the
     // tree and every file's Y.Text (descendants of `contents`), so "undo this
@@ -92,9 +94,30 @@
       send({ type: "doc.awareness", update: b64encode(payload) });
     });
     meta.observeDeep(() => renderTree());
+    settings.observe(renderWorkspaceName);
     renderTree();
     renderTabs();
     updateEmptyHint();
+    renderWorkspaceName();
+  }
+
+  // ---- workspace name (shared, synced via the settings map) --------------
+  const DEFAULT_TITLE = "scriptorium — shared editing, paired like a secret";
+  // Reflect the shared name into the topbar field + browser tab title. Skips
+  // the input when it's focused so a peer's update (or our own echo) never
+  // clobbers what someone is typing.
+  function renderWorkspaceName() {
+    const name = (settings && settings.get("name")) || "";
+    const input = el("ws-name");
+    if (input && document.activeElement !== input) input.value = name;
+    document.title = name ? name + " — scriptorium" : DEFAULT_TITLE;
+  }
+  function setWorkspaceName(str) {
+    if (!settings) return;
+    settings.set("name", String(str == null ? "" : str));
+  }
+  function getWorkspaceName() {
+    return (settings && settings.get("name")) || "";
   }
 
   function setSend(fn) { send = fn; }
@@ -546,6 +569,17 @@
     const pvc = el("btn-preview-close");
     if (pvc) pvc.addEventListener("click", () => setPreviewEnabled(false));
     updatePreviewToggle(null);
+    // Editable workspace name (shared). Debounced so we don't broadcast every
+    // keystroke; the settings map is last-writer-wins on a short string.
+    const nameEl = el("ws-name");
+    if (nameEl) {
+      let t = null;
+      nameEl.addEventListener("input", () => {
+        if (t) clearTimeout(t);
+        const v = nameEl.value;
+        t = setTimeout(() => setWorkspaceName(v), 250);
+      });
+    }
   }
 
   // ---- AI assistant file API ---------------------------------------------
@@ -856,6 +890,8 @@
     reset, setSend, setSelf, setHost, seedIfEmpty, wireControls,
     applyUpdate, applyAwareness, onCatchupRequest, onCatchupEnd,
     renderPresence, removePeer,
+    // shared workspace name (topbar field, download.js)
+    setName: setWorkspaceName, getName: getWorkspaceName,
     // huddle voice-chat membership (huddle.js)
     setHuddle, registerHuddleObserver,
     // binary files: upload/store/read raw bytes (used by uploads, download.js, assistant.js)

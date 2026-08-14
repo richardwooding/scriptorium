@@ -33,6 +33,19 @@
   background: var(--gl-panel);
 }
 .ws-brand { font-weight: 700; letter-spacing: -.01em; }
+/* Editable workspace title — reads as inline text, not a heavy form input. */
+.ws-name {
+  font: inherit; font-weight: 600; color: var(--gl-fg);
+  background: transparent; border: 1px solid transparent; border-radius: 6px;
+  padding: .15rem .4rem; min-width: 6ch; max-width: 22ch; width: 22ch;
+}
+.ws-name::placeholder { color: var(--gl-fg-dim); font-weight: 400; font-style: italic; }
+.ws-name:hover { border-color: var(--gl-border); }
+.ws-name:focus, .ws-name:focus-visible {
+  outline: none; border-color: var(--gl-accent);
+  background: var(--gl-bg);
+}
+@media (max-width: 720px) { .ws-name { max-width: 12ch; width: 12ch; } }
 .ws-spacer { flex: 1; }
 .ws-body { flex: 1; display: flex; min-height: 0; }
 
