@@ -178,7 +178,7 @@
     el("btn-action").addEventListener("click", doAction);
     el("btn-invite").addEventListener("click", openInvite);
     el("btn-download").addEventListener("click", async () => {
-      if (!window.Download) return;
+      if (!window.Download) { toast("download unavailable — reload the page (Ctrl/Cmd+Shift+R)"); return; }
       try {
         const r = await Download.saveZip();
         toast(r.fileCount ? "downloaded " + r.name : "nothing to download yet");
