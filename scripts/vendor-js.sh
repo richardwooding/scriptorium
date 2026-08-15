@@ -16,6 +16,11 @@ run() {
 run editor editor
 run markdown markdown
 run cloudcrypto cloudcrypto
+# Lazy bundles for the rich markdown preview (loaded on demand by enrich()).
+run mermaid mermaid
+run katex katex
+# Self-contained KaTeX stylesheet (woff2 fonts inlined) → web/src/katex.css.
+node "$here/scripts/inline-katex-css.js" "$here/web/src/katex.css"
 # record the resolved versions for drift detection
 node -e 'const p=require("./package.json").dependencies;console.log(Object.entries(p).map(([k,v])=>k+"@"+v).join("\n"))' > "$here/web/src/.js-vendor-version"
 echo "vendored: $(cd "$here/web/src" && ls *.bundle.js)"

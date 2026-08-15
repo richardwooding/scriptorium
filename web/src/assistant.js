@@ -437,7 +437,7 @@
     const log = el("ai-log"); if (!log) return;
     const div = document.createElement("div");
     div.className = "ai-msg ai-" + role;
-    if (role === "assistant" && window.MD) div.innerHTML = window.MD.render(text); // MD sanitizes
+    if (role === "assistant" && window.MD) { div.innerHTML = window.MD.render(text); if (window.MD.enrich) window.MD.enrich(div); } // MD sanitizes; enrich renders diagrams/math
     else div.textContent = text;
     log.appendChild(div); scrollLog();
   }
@@ -469,7 +469,7 @@
   }
   function finalizeAssistant(div, text) {
     div.classList.remove("streaming");
-    if (window.MD) div.innerHTML = window.MD.render(text);
+    if (window.MD) { div.innerHTML = window.MD.render(text); if (window.MD.enrich) window.MD.enrich(div); }
     else div.textContent = text;
     scrollLog();
   }

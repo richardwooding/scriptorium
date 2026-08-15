@@ -50,6 +50,7 @@
   let editor = null;       // { view, setLanguage, destroy } from CMEditor
   let previewObserver = null;
   let previewText = null;
+  let enrichTimer = null;
   let aiUndo = null;       // Y.UndoManager scoped to origin "ai" (assistant edits)
   let previewEnabled = true; // user toggle for the preview pane (persisted)
   let huddleObserver = null; // huddle.js callback: who's in the voice huddle
@@ -395,6 +396,9 @@
   // toggle. Wired once from wireControls; reads the current `editor` each time.
   function applyEditorTheme() {
     if (editor && editor.setTheme && window.CMEditor) editor.setTheme(window.CMEditor.effectiveTheme());
+    // Mermaid bakes theme colors into its SVG, so re-enrich the preview to
+    // re-render diagrams for the new theme (KaTeX/hljs re-theme via CSS).
+    previewEnrich();
   }
   let themeSyncWired = false;
   function wireThemeSync() {
@@ -477,6 +481,7 @@
       previewObserver = null;
       previewText = null;
     }
+    if (enrichTimer) { clearTimeout(enrichTimer); enrichTimer = null; }
     const n = activeId ? meta.get(activeId) : null;
     const show = previewEnabled && n && previewable(n.name);
     updatePreviewToggle(n);
@@ -484,11 +489,22 @@
     pane.hidden = false;
     const t = contents.get(activeId);
     if (!t) return;
-    const draw = () => { el("preview").innerHTML = window.MD.render(t.toString()); };
+    // Render synchronously (cheap, no flicker), then enrich Mermaid/KaTeX in a
+    // debounced pass so fast typing doesn't thrash the heavy renderers.
+    const draw = () => {
+      el("preview").innerHTML = window.MD.render(t.toString());
+      if (enrichTimer) clearTimeout(enrichTimer);
+      enrichTimer = setTimeout(previewEnrich, 200);
+    };
     previewText = t;
     previewObserver = draw;
     t.observe(draw);
     draw();
+  }
+  function previewEnrich() {
+    if (!window.MD || !window.MD.enrich) return;
+    const theme = window.CMEditor && window.CMEditor.effectiveTheme ? window.CMEditor.effectiveTheme() : undefined;
+    window.MD.enrich(el("preview"), { theme });
   }
   // Reflect the toggle's on/off state; disable it when the active file has no
   // preview, so it's clear the control only applies to previewable files.

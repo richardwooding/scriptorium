@@ -51,4 +51,4 @@ jobs:
       - name: Rebuild vendored JS bundles and check for drift
         run: |
           make vendor-js
-          git diff --exit-code -- web/src/*.bundle.js web/src/.js-vendor-version             || { echo "::error::vendored JS bundles are out of date — run 'make vendor-js' and commit"; exit 1; }
+          git diff --exit-code -- web/src/*.bundle.js web/src/.js-vendor-version web/src/katex.css             || { echo "::error::vendored JS bundles are out of date — run 'make vendor-js' and commit"; exit 1; }
