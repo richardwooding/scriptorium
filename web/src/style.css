@@ -126,6 +126,14 @@ video.bin-media, audio.bin-media { width: 100%; }
 .markdown-body img { max-width: 100%; }
 .markdown-body table { border-collapse: collapse; }
 .markdown-body th, .markdown-body td { border: 1px solid var(--gl-border); padding: .3rem .6rem; }
+/* front-matter metadata card (YAML/TOML/JSON parsed out of the leading block) */
+.markdown-body .md-frontmatter { background: var(--gl-panel); border: 1px solid var(--gl-border); border-radius: 8px; padding: .6rem .8rem; margin: 0 0 1.1rem; font-size: .85rem; }
+.markdown-body .md-frontmatter dl { display: grid; grid-template-columns: max-content 1fr; column-gap: .9rem; row-gap: .35rem; margin: 0; }
+.markdown-body .md-frontmatter dt { color: var(--gl-muted); font-family: var(--gl-mono); font-size: .8rem; }
+.markdown-body .md-frontmatter dd { margin: 0; color: var(--gl-fg); overflow-wrap: anywhere; }
+.markdown-body .md-frontmatter dd code { background: var(--gl-bg); }
+.markdown-body .fm-pill { display: inline-block; background: color-mix(in srgb, var(--gl-accent) 18%, transparent); color: var(--gl-accent-2); border-radius: 999px; padding: .05rem .5rem; margin: 0 .3rem .3rem 0; font-size: .78rem; }
+.markdown-body .md-frontmatter-raw { background: var(--gl-panel); border: 1px solid var(--gl-border); border-radius: 8px; padding: .5rem .7rem; margin: 0 0 1.1rem; overflow-x: auto; font-size: .82rem; }
 
 /* ---- presence -------------------------------------------------------- */
 .presence { display: flex; gap: .25rem; align-items: center; }
