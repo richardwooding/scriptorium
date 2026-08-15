@@ -68,8 +68,10 @@
         <span id="presence" class="presence" aria-label="People here"></span>
         <span class="ws-spacer"></span>
         <span id="cloud-status" class="cloud-status gl-hint" hidden></span>
+        <span id="publish-status" class="cloud-status gl-hint" hidden></span>
         <button id="btn-invite" class="gl-btn ghost" aria-label="Invite">Invite</button>
         <button id="btn-download" class="gl-btn ghost" title="Download workspace as .zip">⇩ Download</button>
+        <button id="btn-publish" class="gl-btn ghost" aria-expanded="false" aria-controls="publish-pane" title="Publish to GitHub">⇧ Publish</button>
         <button id="btn-preview" class="gl-btn ghost" aria-pressed="true" aria-controls="preview-pane" title="Toggle preview">◨ Preview</button>
         <button id="btn-huddle" class="gl-btn ghost" aria-expanded="false" aria-controls="huddle-pane" title="Voice huddle">🎙 Huddle</button>
         <button id="btn-ai" class="gl-btn ghost" aria-expanded="false" aria-controls="ai-pane">✦ Assistant</button>
@@ -136,6 +138,29 @@
           <p class="gl-hint huddle-note">Peer-to-peer &amp; encrypted — audio never touches the server. Mesh + STUN; some networks (symmetric NAT) may not connect.</p>
           <div id="huddle-audio" hidden></div>
         </aside>
+        <aside id="publish-pane" class="ai-pane" hidden aria-label="Publish to GitHub">
+          <div class="ai-head">
+            <span>⇧ Publish</span>
+            <span class="ai-head-actions">
+              <button id="btn-publish-settings" class="icon-btn" title="GitHub token &amp; repo settings" aria-label="Publish settings">⚙</button>
+              <button id="btn-publish-close" class="icon-btn" title="Close" aria-label="Close publish">✕</button>
+            </span>
+          </div>
+          <div class="publish-body">
+            <p class="gl-hint">Pushes this workspace to a GitHub repo, then <strong>GitHub Actions</strong> builds &amp; publishes artifacts. Your token stays in this browser and is sent only to GitHub.</p>
+            <p class="gl-hint">Target: <code id="publish-target">—</code> <span class="gl-hint-inline">(change in ⚙)</span></p>
+            <fieldset class="publish-workflows">
+              <legend>Add a starter workflow (optional)</legend>
+              <label><input type="checkbox" id="wf-release"> GitHub Release</label>
+              <label><input type="checkbox" id="wf-pages"> GitHub Pages</label>
+              <label><input type="checkbox" id="wf-npm"> npm package</label>
+              <label><input type="checkbox" id="wf-container"> Container → GHCR</label>
+              <button id="btn-add-workflows" class="gl-btn ghost" type="button">Add to workspace</button>
+            </fieldset>
+            <button id="btn-publish-now" class="gl-btn primary">Publish to GitHub</button>
+            <div id="publish-log" class="ai-log" role="log" aria-live="polite"></div>
+          </div>
+        </aside>
       </div>
     </section>
   </main>
@@ -150,6 +175,30 @@
         <button id="btn-copy-link" class="gl-btn primary">Copy link</button>
         <button id="btn-copy-phrase" class="gl-btn ghost">Copy phrase</button>
         <button id="btn-close-invite" class="gl-btn ghost">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="publish-settings" class="modal" hidden>
+    <div class="modal-card ai-settings-card">
+      <h2>Publish settings</h2>
+      <p class="gl-hint">Bring your own <strong>GitHub Personal Access Token</strong>. It's stored only in this
+        browser and sent directly to GitHub — never to the scriptorium server. Scopes: <code>repo</code> plus
+        <code>workflow</code> (needed to push <code>.github/workflows</code> files). Publishing sends your code
+        to GitHub — a deliberate egress outside the end-to-end-encrypted session.</p>
+      <label for="gh-token">GitHub token</label>
+      <input id="gh-token" class="ai-field" type="password" autocomplete="off" spellcheck="false" placeholder="ghp_… or github_pat_…">
+      <label for="gh-owner">Owner <span class="gl-hint-inline">(optional — defaults to your login; set an org to publish there)</span></label>
+      <input id="gh-owner" class="ai-field" type="text" autocomplete="off" spellcheck="false" placeholder="your-login-or-org">
+      <label for="gh-repo">Repository</label>
+      <input id="gh-repo" class="ai-field" type="text" autocomplete="off" spellcheck="false" placeholder="my-workspace">
+      <label for="gh-branch">Branch</label>
+      <input id="gh-branch" class="ai-field" type="text" autocomplete="off" spellcheck="false" placeholder="main">
+      <label class="publish-check"><input id="gh-private" type="checkbox"> Create as a private repository</label>
+      <div class="modal-actions">
+        <button id="btn-gh-save" class="gl-btn primary">Save</button>
+        <button id="btn-gh-forget" class="gl-btn ghost">Forget token</button>
+        <button id="btn-gh-close-settings" class="gl-btn ghost">Close</button>
       </div>
     </div>
   </div>
@@ -196,6 +245,7 @@
   <script src="assistant.js"></script>
   <script src="huddle.js"></script>
   <script src="download.js"></script>
+  <script src="publish.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

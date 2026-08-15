@@ -79,6 +79,10 @@
     if (window.Assistant) {
       Assistant.init({ workspace: Workspace, self: { name: nameInput() || "anon", pid: selfId } });
     }
+    // Publish is a local, browser-only feature: it pushes the workspace straight
+    // to GitHub with the user's own token (relay never in the loop), then Actions
+    // builds & publishes. Fresh per session.
+    if (window.Publish) Publish.init({ workspace: Workspace });
     // The huddle (WebRTC voice) meshes peers over the same session; signaling
     // rides the core, audio is P2P. Fresh per session. The send wrapper adapts
     // huddle.js's (to,kind,payload) calls to the bridge's huddle.signal command.

@@ -28,6 +28,11 @@ design as its sibling [confab](https://github.com/richardwooding/confab).
   It runs in your browser and talks to your provider directly; content you share
   with it leaves the E2EE session by your choice. See
   [docs/AI-ASSISTANT.md](docs/AI-ASSISTANT.md).
+- **Publish to GitHub** — bring your own token and push the workspace to a repo as
+  a real Git commit, straight from the browser; **GitHub Actions** then builds and
+  publishes artifacts (Release / Pages / npm / container → GHCR). scriptorium
+  builds nothing and the relay is never in the loop. See
+  [docs/PUBLISH.md](docs/PUBLISH.md).
 - **Huddle (voice chat)** — one-click peer-to-peer voice while you edit (WebRTC
   full mesh + STUN). Audio flows P2P and encrypted, never through the server;
   signaling is opaque over parley. See [docs/HUDDLE.md](docs/HUDDLE.md).

@@ -16,6 +16,15 @@ host autosaves/restores it. The store holds only ciphertext; the object key is
 `HMAC(s3-secret, sid)` so callers can't name arbitrary keys. See
 docs/THREAT-MODEL.md.
 
+Two browser-only, BYO-credential, relay-never-in-the-loop features (both mirror
+the assistant's IIFE + settings-modal pattern; no Go/server change): the **AI
+assistant** (`web/src/assistant.js`, BYO LLM key) and **Publish to GitHub**
+(`web/src/publish.js`, BYO PAT) — the latter pushes the whole workspace as a real
+Git commit via the GitHub REST Git Data API (blobs→tree→commit→ref, full
+snapshot, no base_tree) and delegates build+publish to GitHub Actions (it can
+scaffold Release/Pages/npm/container starter workflows into the workspace). GitHub
+sends CORS so the browser calls api.github.com directly. See docs/PUBLISH.md.
+
 ## Commands
 
 ```sh
