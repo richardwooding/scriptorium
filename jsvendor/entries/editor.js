@@ -30,7 +30,8 @@ import { StreamLanguage } from "@codemirror/language";
 import { go } from "@codemirror/legacy-modes/mode/go";
 import { shell } from "@codemirror/legacy-modes/mode/shell";
 
-// gloam-flavoured dark theme (purple accent, near-black panels).
+// gloam-flavoured DARK theme (purple accent, near-black panels). GitHub-dark
+// syntax palette — tuned for the dark #0d1117 background.
 const gloamTheme = EditorView.theme({
   "&": { color: "#e6edf3", backgroundColor: "transparent", height: "100%" },
   ".cm-content": { caretColor: "#a371f7", fontFamily: "ui-monospace,SFMono-Regular,Menlo,monospace" },
@@ -53,6 +54,45 @@ const gloamHighlight = HighlightStyle.define([
   { tag: [t.link, t.url], color: "#a5d6ff", textDecoration: "underline" },
 ]);
 
+// gloam LIGHT theme — GitHub-light palette, strong contrast on the white
+// (#ffffff) background used in light mode. Keeps the purple accent on-brand.
+const gloamThemeLight = EditorView.theme({
+  "&": { color: "#1f2328", backgroundColor: "transparent", height: "100%" },
+  ".cm-content": { caretColor: "#7c3aed", fontFamily: "ui-monospace,SFMono-Regular,Menlo,monospace" },
+  ".cm-cursor, .cm-dropCursor": { borderLeftColor: "#7c3aed" },
+  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: "#e2d5fb" },
+  ".cm-gutters": { backgroundColor: "transparent", color: "#818b98", border: "none" },
+  ".cm-activeLine": { backgroundColor: "rgba(124,58,237,0.06)" },
+  ".cm-activeLineGutter": { backgroundColor: "transparent" },
+}, { dark: false });
+
+const gloamHighlightLight = HighlightStyle.define([
+  { tag: t.keyword, color: "#cf222e" },
+  { tag: [t.string, t.special(t.string)], color: "#0a3069" },
+  { tag: [t.comment, t.lineComment, t.blockComment], color: "#6e7781", fontStyle: "italic" },
+  { tag: [t.number, t.bool, t.null], color: "#0550ae" },
+  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: "#8250df" },
+  { tag: [t.typeName, t.className, t.namespace], color: "#953800" },
+  { tag: [t.propertyName, t.attributeName], color: "#116329" },
+  { tag: [t.heading], color: "#8250df", fontWeight: "bold" },
+  { tag: [t.link, t.url], color: "#0a3069", textDecoration: "underline" },
+]);
+
+// Effective theme: an explicit <html data-theme> wins, else the OS preference.
+function effectiveTheme() {
+  const explicit = document.documentElement.getAttribute("data-theme");
+  if (explicit === "light" || explicit === "dark") return explicit;
+  return window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+// The theme + syntax highlight extensions for a mode, swapped as one unit via a
+// Compartment so a theme flip is a cheap reconfigure (no view rebuild).
+function themeExt(mode) {
+  return mode === "light"
+    ? [gloamThemeLight, syntaxHighlighting(gloamHighlightLight)]
+    : [gloamTheme, syntaxHighlighting(gloamHighlight)];
+}
+
 function langForExt(ext) {
   switch (ext) {
     case "md": case "markdown": return markdown();
@@ -71,10 +111,12 @@ function langForExt(ext) {
 }
 
 const language = new Compartment();
+const theme = new Compartment();
 
 window.CMEditor = {
-  // create({parent, ytext, awareness, path}) → { view, setLanguage(path), destroy() }
-  create({ parent, ytext, awareness, path }) {
+  // create({parent, ytext, awareness, path, theme}) → { view, setLanguage(path), setTheme(mode), destroy() }
+  create({ parent, ytext, awareness, path, theme: mode }) {
+    const initial = mode === "light" || mode === "dark" ? mode : effectiveTheme();
     const view = new EditorView({
       parent,
       state: EditorState.create({
@@ -85,7 +127,7 @@ window.CMEditor = {
           autocompletion(), highlightSelectionMatches(),
           keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap,
                      ...historyKeymap, ...completionKeymap, indentWithTab]),
-          gloamTheme, syntaxHighlighting(gloamHighlight),
+          theme.of(themeExt(initial)),
           language.of(langForExt(extOf(path))),
           // yCollab binds the editor to the Y.Text and renders remote cursors
           // from awareness; it also feeds local edits back into the Y.Doc.
@@ -96,10 +138,14 @@ window.CMEditor = {
     return {
       view,
       setLanguage(p) { view.dispatch({ effects: language.reconfigure(langForExt(extOf(p))) }); },
+      // Hot-swap the theme + syntax palette without rebuilding the view, so the
+      // cursor, selection, and yCollab binding survive a light/dark flip.
+      setTheme(m) { view.dispatch({ effects: theme.reconfigure(themeExt(m === "light" ? "light" : "dark")) }); },
       destroy() { view.destroy(); },
     };
   },
   languageForPath: (p) => extOf(p),
+  effectiveTheme,
 };
 
 function extOf(path) {

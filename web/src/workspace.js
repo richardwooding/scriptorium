@@ -386,7 +386,24 @@
       ytext,
       awareness,
       path: n ? n.name : "",
+      theme: window.CMEditor.effectiveTheme(),
     });
+  }
+  // Re-theme the live editor when the (OS or explicit) color scheme changes.
+  // scriptorium has no in-app toggle, so prefers-color-scheme is the primary
+  // signal; the data-theme observer covers an explicit override / a future
+  // toggle. Wired once from wireControls; reads the current `editor` each time.
+  function applyEditorTheme() {
+    if (editor && editor.setTheme && window.CMEditor) editor.setTheme(window.CMEditor.effectiveTheme());
+  }
+  let themeSyncWired = false;
+  function wireThemeSync() {
+    if (themeSyncWired) return;
+    themeSyncWired = true;
+    try {
+      window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", applyEditorTheme);
+    } catch (_) { /* older browsers */ }
+    new MutationObserver(applyEditorTheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
   }
   function revokeBinURL() { if (binURL) { URL.revokeObjectURL(binURL); binURL = null; } }
   // Render a binary file in the editor pane: native <img>/<iframe>/<audio>/<video>
@@ -558,6 +575,7 @@
 
   // ---- UI wiring for tree + preview buttons ------------------------------
   function wireControls() {
+    wireThemeSync();
     const nf = el("btn-new-file");
     const nd = el("btn-new-dir");
     if (nf) nf.addEventListener("click", () => {
