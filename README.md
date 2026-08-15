@@ -33,6 +33,8 @@ design as its sibling [confab](https://github.com/richardwooding/confab).
   publishes artifacts (Release / Pages / npm / container → GHCR). scriptorium
   builds nothing and the relay is never in the loop. See
   [docs/PUBLISH.md](docs/PUBLISH.md).
+- **Installable PWA** — install scriptorium as an app (standalone window, home-screen
+  icon); the shell works offline, though a live session still needs the relay.
 - **Huddle (voice chat)** — one-click peer-to-peer voice while you edit (WebRTC
   full mesh + STUN). Audio flows P2P and encrypted, never through the server;
   signaling is opaque over parley. See [docs/HUDDLE.md](docs/HUDDLE.md).

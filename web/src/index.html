@@ -6,9 +6,15 @@
   <title>scriptorium — shared editing, paired like a secret</title>
   <meta name="description" content="A shared, end-to-end-encrypted collaborative editor. Share a phrase, edit together — the server can't read a word.">
   <meta name="theme-color" content="#0d1117">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="scriptorium">
   <link rel="stylesheet" href="gloam.css">
   <link rel="stylesheet" href="style.css">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="manifest" href="manifest.json">
   <script>try{var t=localStorage.getItem("gl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
 </head>
@@ -34,6 +40,7 @@
                    spellcheck="false" placeholder="paste it here — like lion-42-maple">
             <div class="home-actions">
               <button id="btn-action" class="gl-btn primary" disabled>▶ New workspace</button>
+              <button id="btn-install" class="gl-btn ghost" hidden title="Install scriptorium as an app">⤓ Install app</button>
             </div>
             <p id="home-status" class="gl-hint" role="status" aria-live="polite">loading the encrypted core…</p>
           </div>

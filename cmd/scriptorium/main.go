@@ -123,6 +123,10 @@ func contentType(p string) string {
 		return "application/json"
 	case ".svg":
 		return "image/svg+xml"
+	case ".png":
+		return "image/png"
+	case ".ico":
+		return "image/x-icon"
 	default:
 		return "application/octet-stream"
 	}

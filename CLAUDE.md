@@ -25,6 +25,15 @@ snapshot, no base_tree) and delegates build+publish to GitHub Actions (it can
 scaffold Release/Pages/npm/container starter workflows into the workspace). GitHub
 sends CORS so the browser calls api.github.com directly. See docs/PUBLISH.md.
 
+**Installable PWA:** `web/src/manifest.json` (standalone, PNG + maskable icons) +
+apple/mobile meta in index.html + the registered network-first service worker
+(`web/src/service-worker.js`; bump `CACHE` on any shell change) + an `#btn-install`
+(beforeinstallprompt) on the home view. Icons are generated from
+`web/src/favicon.svg` / `scripts/icons/maskable.svg` via `scripts/gen-icons.sh`
+(rsvg-convert) into flat `web/src/*.png` — Makefile `cp web/src/*` is
+non-recursive, so keep icons flat. `contentType()` in cmd/scriptorium/main.go
+serves .png/.ico/.svg/.json.
+
 ## Commands
 
 ```sh

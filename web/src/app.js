@@ -244,7 +244,34 @@
     }
   }
 
+  // PWA install: Chrome/Android fire beforeinstallprompt when the app is
+  // installable — stash it and reveal an "Install app" button on the home view.
+  // Already-installed / standalone → stay hidden. iOS Safari doesn't fire this
+  // (users use Share → Add to Home Screen), so the button simply never appears.
+  function setupInstall() {
+    const btn = el("btn-install");
+    if (!btn) return;
+    const standalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
+    if (standalone) return;
+    let deferred = null;
+    window.addEventListener("beforeinstallprompt", (e) => {
+      e.preventDefault();
+      deferred = e;
+      btn.hidden = false;
+    });
+    btn.addEventListener("click", async () => {
+      if (!deferred) return;
+      btn.disabled = true;
+      deferred.prompt();
+      try { await deferred.userChoice; } catch (_) { /* dismissed */ }
+      deferred = null;
+      btn.hidden = true;
+      btn.disabled = false;
+    });
+    window.addEventListener("appinstalled", () => { deferred = null; btn.hidden = true; });
+  }
+
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", () => { boot(); loadCore(); registerSW(); });
-  } else { boot(); loadCore(); registerSW(); }
+    document.addEventListener("DOMContentLoaded", () => { boot(); loadCore(); registerSW(); setupInstall(); });
+  } else { boot(); loadCore(); registerSW(); setupInstall(); }
 })();
