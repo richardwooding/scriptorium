@@ -168,6 +168,7 @@
     });
     if (gone.length) removeAwarenessStates(awareness, gone, REMOTE);
     renderPresence();
+    refreshViewingAvatars();
   }
   function setHost(isHost) { self.host = !!isHost; }
 
@@ -191,6 +192,7 @@
     try { applyAwarenessUpdate(awareness, b64decode(b64), REMOTE); }
     catch (e) { console.warn("[doc] bad awareness", e); }
     renderPresence();
+    scheduleViewingAvatars();
   }
   // Host answers a late joiner: hand them the full current state, then signal
   // done. Go chunks the (possibly large) state across frames.
@@ -269,6 +271,7 @@
         const n = meta.get(id);
         const li = document.createElement("li");
         li.className = "tree-node " + n.kind + (id === activeId ? " active" : "");
+        li.dataset.id = id;
         li.setAttribute("role", "treeitem");
         li.style.paddingLeft = 8 + depth * 14 + "px";
         li.tabIndex = 0;
@@ -307,6 +310,57 @@
       });
     };
     build("", 0);
+    refreshViewingAvatars();
+  }
+  // ---- per-file presence (who's viewing which file) ----------------------
+  // Peer "mini" avatars on each file's tab + tree row, from the awareness
+  // `file` field. Updated IN PLACE (no tree rebuild) and throttled, because
+  // cursor moves also flood the awareness channel.
+  let viewingTimer = null;
+  function scheduleViewingAvatars() {
+    if (viewingTimer) return;
+    viewingTimer = setTimeout(() => { viewingTimer = null; refreshViewingAvatars(); }, 120);
+  }
+  function refreshViewingAvatars() {
+    document.querySelectorAll(".viewing-avatars").forEach((e) => e.remove());
+    if (!awareness) return;
+    const byFile = new Map();
+    awareness.getStates().forEach((st) => {
+      const u = st && st.user;
+      const fid = st && st.file;
+      if (!u || !fid || u.pid === self.pid) return; // skip self + peers not in a file
+      if (!byFile.has(fid)) byFile.set(fid, []);
+      byFile.get(fid).push(u);
+    });
+    if (!byFile.size) return;
+    document.querySelectorAll("#tabs .tab[data-id]").forEach((tab) => {
+      const peers = byFile.get(tab.dataset.id);
+      if (peers) tab.appendChild(avatarCluster(peers));
+    });
+    document.querySelectorAll("#tree .tree-node[data-id]").forEach((row) => {
+      const peers = byFile.get(row.dataset.id);
+      if (peers) row.insertBefore(avatarCluster(peers), row.querySelector(".tn-del"));
+    });
+  }
+  function avatarCluster(peers) {
+    const wrap = document.createElement("span");
+    wrap.className = "viewing-avatars";
+    peers.slice(0, 3).forEach((u) => {
+      const a = document.createElement("span");
+      a.className = "who who-mini";
+      a.style.background = u.color || "#6e7681";
+      a.textContent = (u.name || "?").slice(0, 1).toUpperCase();
+      a.title = (u.name || "someone") + " is viewing this file";
+      wrap.appendChild(a);
+    });
+    if (peers.length > 3) {
+      const more = document.createElement("span");
+      more.className = "who who-mini who-more";
+      more.textContent = "+" + (peers.length - 3);
+      more.title = peers.length + " people viewing";
+      wrap.appendChild(more);
+    }
+    return wrap;
   }
   function promptRename(id) {
     const n = meta.get(id);
@@ -328,6 +382,7 @@
     if (!n || n.kind !== "file") return;
     if (!openTabs.includes(id)) openTabs.push(id);
     activeId = id;
+    setViewing();
     mountEditor(id);
     renderTabs();
     renderTree();
@@ -340,10 +395,16 @@
       activeId = openTabs[openTabs.length - 1] || null;
       if (activeId) mountEditor(activeId);
       else { if (editor) { editor.destroy(); editor = null; } revokeBinURL(); el("editor-host").textContent = ""; }
+      setViewing();
     }
     renderTabs();
     updateEmptyHint();
     syncPreview();
+  }
+  // Broadcast which file this client is viewing, so peers can show presence
+  // avatars on that file's tab/tree row. Rides the same awareness channel.
+  function setViewing() {
+    if (awareness) awareness.setLocalStateField("file", activeId || null);
   }
   function renderTabs() {
     const bar = el("tabs");
@@ -354,6 +415,7 @@
       if (!n) return;
       const tab = document.createElement("div");
       tab.className = "tab" + (id === activeId ? " active" : "");
+      tab.dataset.id = id;
       tab.setAttribute("role", "tab");
       tab.tabIndex = 0;
       const name = document.createElement("span");
@@ -371,6 +433,7 @@
       });
       bar.appendChild(tab);
     });
+    refreshViewingAvatars();
   }
   function mountEditor(id) {
     const host = el("editor-host");
@@ -540,9 +603,10 @@
       chip.className = "who" + (ai ? " ai-active" : "");
       chip.style.background = u.color || "#6e7681";
       const who = u.name || "someone";
+      const viewing = st && st.file ? " · " + idToPath(st.file) : "";
       chip.title = ai
         ? who + (ai.file ? " · assistant editing " + ai.file : " · assistant working")
-        : (hud ? who + " · in the huddle" + (st.huddle.muted ? " (muted)" : "") : who);
+        : (hud ? who + " · in the huddle" + (st.huddle.muted ? " (muted)" : "") : who + viewing);
       chip.textContent = (u.name || "?").slice(0, 1).toUpperCase();
       if (ai) {
         // subtle indicator so collaborators see an assistant is touching files
