@@ -43,6 +43,12 @@
     for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
     return btoa(s);
   }
+  function b64decode(s) {
+    const bin = atob((s || "").replace(/\s+/g, ""));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
 
   function sanitizeRepo(s) {
     return (s || "").trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 100) || "workspace";
@@ -59,10 +65,11 @@
   async function gh(method, path, body, opts) {
     opts = opts || {};
     const headers = {
-      authorization: "Bearer " + config().token,
       accept: "application/vnd.github+json",
       "x-github-api-version": "2022-11-28",
     };
+    const tok = config().token;
+    if (tok) headers.authorization = "Bearer " + tok; // omit when empty → public repos work unauthenticated
     if (body) headers["content-type"] = "application/json";
     let res;
     try {
@@ -109,7 +116,7 @@
     }
     if (!files.length) { logErr("nothing to publish — the workspace is empty"); return; }
 
-    busy = true; setBusy(true); clearLog();
+    busy = true; setBusy(true, "publish"); clearLog();
     try {
       const me = await gh("GET", "/user");
       const login = me.login;
@@ -149,6 +156,63 @@
       logLink("view commit", repoUrl + "/commit/" + commit.sha);
       logLink("Actions (build & publish artifacts)", repoUrl + "/actions");
       setStatus("published");
+    } catch (e) {
+      logErr(e && e.message ? e.message : String(e));
+      setStatus("");
+    } finally {
+      busy = false; setBusy(false);
+    }
+  }
+
+  // ---- import flow (mirror of publish; public repos need no token) --------
+  async function importFromGitHub() {
+    if (busy) return;
+    const W = window.Workspace;
+    if (!W || !W.importReplace) { logErr("workspace not ready — reload the page"); return; }
+    const cfg = config();
+    const repo = sanitizeRepo(cfg.repo || defaultRepoName());
+    let owner = cfg.owner;
+
+    busy = true; setBusy(true, "import"); clearLog();
+    try {
+      if (!owner) {
+        if (!cfg.token) throw new Error("set Owner (and Repository) in ⚙ settings — a public import needs the owner");
+        owner = (await gh("GET", "/user")).login;
+      }
+      if (!window.confirm("Import " + owner + "/" + repo + " — this REPLACES the current workspace for everyone. Continue?")) {
+        log("import cancelled");
+        return;
+      }
+      log("importing " + owner + "/" + repo + " …");
+      // Resolve branch → tree (fall back to the repo's default branch).
+      let branch = cfg.branch;
+      let br = await gh("GET", "/repos/" + owner + "/" + repo + "/branches/" + encodeURIComponent(branch), null, { allow404: true });
+      if (!br) {
+        const r = await gh("GET", "/repos/" + owner + "/" + repo);
+        branch = r.default_branch;
+        br = await gh("GET", "/repos/" + owner + "/" + repo + "/branches/" + encodeURIComponent(branch));
+      }
+      const treeSha = br.commit.commit.tree.sha;
+      const tree = await gh("GET", "/repos/" + owner + "/" + repo + "/git/trees/" + treeSha + "?recursive=1");
+      if (tree.truncated) log("note: the repo is large — GitHub truncated the tree; some files may be missing");
+      let entries = tree.tree.filter((e) => e.type === "blob");
+      const MAX_FILES = 400;
+      let capped = false;
+      if (entries.length > MAX_FILES) { entries = entries.slice(0, MAX_FILES); capped = true; }
+      log("fetching " + entries.length + " file(s)…");
+      const files = [];
+      for (const e of entries) {
+        if (e.size > 5 * 1024 * 1024) { log("skip (large): " + e.path); continue; }
+        const blob = await gh("GET", "/repos/" + owner + "/" + repo + "/git/blobs/" + e.sha);
+        files.push({ path: e.path, bytes: b64decode(blob.content) });
+      }
+      const res = W.importReplace(files);
+      log("✓ imported " + res.written + " file(s) from " + owner + "/" + repo + " @ " + branch);
+      if (capped) log("only the first " + MAX_FILES + " files were imported (repo is large)");
+      for (const s of res.skipped.slice(0, 8)) log("skipped " + s.path + " (" + s.reason + ")");
+      if (res.skipped.length > 8) log("…and " + (res.skipped.length - 8) + " more skipped");
+      logLink("open repository", "https://github.com/" + owner + "/" + repo);
+      setStatus("imported");
     } catch (e) {
       logErr(e && e.message ? e.message : String(e));
       setStatus("");
@@ -320,9 +384,10 @@
     if (!text) { s.hidden = true; s.textContent = ""; return; }
     s.hidden = false; s.textContent = "⇧ " + text;
   }
-  function setBusy(b) {
-    const btn = el("btn-publish-now");
-    if (btn) { btn.disabled = b; btn.textContent = b ? "Publishing…" : "Publish to GitHub"; }
+  function setBusy(b, which) {
+    const p = el("btn-publish-now"), i = el("btn-import-now");
+    if (p) { p.disabled = b; p.textContent = b && which === "publish" ? "Publishing…" : "Publish to GitHub"; }
+    if (i) { i.disabled = b; i.textContent = b && which === "import" ? "Importing…" : "⤓ Import from GitHub"; }
   }
   function refreshTarget() {
     const cfg = config();
@@ -387,6 +452,7 @@
     wireOnce("btn-publish-close", "click", close);
     wireOnce("btn-publish-settings", "click", openSettings);
     wireOnce("btn-publish-now", "click", publish);
+    wireOnce("btn-import-now", "click", importFromGitHub);
     wireOnce("btn-add-workflows", "click", onAddWorkflows);
     wireOnce("btn-gh-save", "click", saveSettings);
     wireOnce("btn-gh-forget", "click", forgetKey);
@@ -399,5 +465,5 @@
     if (node && !node["_w_" + ev]) { node.addEventListener(ev, fn); node["_w_" + ev] = true; }
   }
 
-  window.Publish = { init, open, close, toggle, openSettings, isConfigured, publish, addWorkflows };
+  window.Publish = { init, open, close, toggle, openSettings, isConfigured, publish, importFromGitHub, addWorkflows };
 })();

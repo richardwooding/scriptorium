@@ -932,6 +932,47 @@
     return { errors: errs };
   }
 
+  // Replace the ENTIRE workspace with an imported set of files (e.g. a GitHub
+  // repo). files: [{ path, bytes:Uint8Array, mime? }]. Valid-UTF-8 files become
+  // editable text; the rest become view-only binaries. One atomic transaction =
+  // one undo unit + one broadcast to peers. Enforces the per-file + whole-
+  // workspace size budget; returns { written, skipped:[{path,reason}] }.
+  function importReplace(files) {
+    const skipped = [];
+    const prepared = [];
+    let total = 0;
+    for (const f of (files || [])) {
+      const bytes = f.bytes instanceof Uint8Array ? f.bytes : new Uint8Array(f.bytes || 0);
+      if (bytes.length > MAX_BLOB) { skipped.push({ path: f.path, reason: "over 5 MiB" }); continue; }
+      if (total + bytes.length > MAX_TOTAL) { skipped.push({ path: f.path, reason: "workspace size budget" }); continue; }
+      total += bytes.length;
+      let text = null;
+      if (looksTextual(f.path, f.mime)) {
+        try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch (_) { text = null; }
+      }
+      prepared.push(text != null ? { path: f.path, text } : { path: f.path, bytes, mime: f.mime });
+    }
+    doc.transact(() => {
+      meta.clear(); contents.clear(); blobs.clear();
+      for (const p of prepared) {
+        if (p.text != null) {
+          const id = createFile(leafName(p.path), ensureParent(p.path));
+          if (p.text) contents.get(id).insert(0, p.text);
+        } else {
+          const id = uuid();
+          meta.set(id, { name: leafName(p.path), parent: ensureParent(p.path), kind: "file", order: meta.size, bin: true, mime: p.mime || mimeFromName(p.path) });
+          blobs.set(id, p.bytes);
+        }
+      }
+    }, AI_ORIGIN);
+    openTabs = [];
+    activeId = null;
+    const ids = [...meta.keys()].filter((id) => meta.get(id).kind === "file");
+    const first = ids.find((id) => /(^|\/)readme\.md$/i.test(idToPath(id))) || ids[0];
+    if (first) openFile(first); else { renderTree(); renderTabs(); updateEmptyHint(); }
+    return { written: prepared.length, skipped };
+  }
+
   function aiCheckpoint() { if (aiUndo) aiUndo.stopCapturing(); }
   function aiUndoTurn() {
     if (!aiUndo) return false;
@@ -955,7 +996,7 @@
     // huddle voice-chat membership (huddle.js)
     setHuddle, registerHuddleObserver,
     // binary files: upload/store/read raw bytes (used by uploads, download.js, assistant.js)
-    putBinary, readBytes, importFiles,
+    putBinary, readBytes, importFiles, importReplace,
     // AI assistant surface (assistant.js)
     ai: {
       list: fsList, read: fsRead, edit: fsEdit, write: fsWrite,

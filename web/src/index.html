@@ -158,8 +158,9 @@
             </span>
           </div>
           <div class="publish-body">
-            <p class="gl-hint">Pushes this workspace to a GitHub repo, then <strong>GitHub Actions</strong> builds &amp; publishes artifacts. Your token stays in this browser and is sent only to GitHub.</p>
-            <p class="gl-hint">Target: <code id="publish-target">—</code> <span class="gl-hint-inline">(change in ⚙)</span></p>
+            <p class="gl-hint">Sync this workspace with a GitHub repo — <strong>Import</strong> pulls a repo in to edit; <strong>Publish</strong> pushes it back and <strong>GitHub Actions</strong> builds &amp; publishes artifacts. Your token stays in this browser and is sent only to GitHub (public repos import without one).</p>
+            <p class="gl-hint">Repo: <code id="publish-target">—</code> <span class="gl-hint-inline">(change in ⚙)</span></p>
+            <button id="btn-import-now" class="gl-btn ghost">⤓ Import from GitHub</button>
             <fieldset class="publish-workflows">
               <legend>Add a starter workflow (optional)</legend>
               <label><input type="checkbox" id="wf-release"> GitHub Release</label>

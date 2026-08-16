@@ -28,11 +28,11 @@ design as its sibling [confab](https://github.com/richardwooding/confab).
   It runs in your browser and talks to your provider directly; content you share
   with it leaves the E2EE session by your choice. See
   [docs/AI-ASSISTANT.md](docs/AI-ASSISTANT.md).
-- **Publish to GitHub** — bring your own token and push the workspace to a repo as
-  a real Git commit, straight from the browser; **GitHub Actions** then builds and
-  publishes artifacts (Release / Pages / npm / container → GHCR). scriptorium
-  builds nothing and the relay is never in the loop. See
-  [docs/PUBLISH.md](docs/PUBLISH.md).
+- **Import / Publish with GitHub** — pull a repo in to edit together (public repos
+  need no token), then push the workspace back as a real Git commit, straight from
+  the browser; **GitHub Actions** then builds and publishes artifacts (Release /
+  Pages / npm / container → GHCR). scriptorium builds nothing and the relay is
+  never in the loop. See [docs/PUBLISH.md](docs/PUBLISH.md).
 - **Installable PWA** — install scriptorium as an app (standalone window, home-screen
   icon); the shell works offline, though a live session still needs the relay.
 - **Huddle (voice chat)** — one-click peer-to-peer voice while you edit (WebRTC
