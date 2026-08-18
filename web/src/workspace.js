@@ -70,8 +70,28 @@
   let readOnly = false;          // are WE a spectator?
   let observerIds = new Set();   // parley ids the host seated as observers
 
+  // Broadcast local awareness (cursor/presence) changes to peers. A named
+  // handler (not an inline closure) so reset() can detach it from the previous
+  // session's awareness before tearing the editor down — otherwise the yCollab
+  // unbind removes our local state, which re-enters this on an awareness that's
+  // mid-teardown and makes encodeAwarenessUpdate throw on the dropped client.
+  // The try/catch is belt-and-suspenders for any other teardown path; dropping a
+  // presence frame during shutdown is harmless.
+  function awarenessBroadcast({ added, updated, removed }, origin) {
+    if (origin === REMOTE || !awareness) return;
+    try {
+      const changed = added.concat(updated, removed);
+      const payload = encodeAwarenessUpdate(awareness, changed);
+      send({ type: "doc.awareness", update: b64encode(payload) });
+    } catch (_) { /* awareness mid-teardown: nothing to broadcast */ }
+  }
+
   // ---- lifecycle ---------------------------------------------------------
   function reset() {
+    // Detach the previous session's presence broadcaster before destroying its
+    // editor, so the yCollab unbind (which removes our local awareness state)
+    // can't fire it on a torn-down awareness (issue #23).
+    if (awareness) awareness.off("update", awarenessBroadcast);
     if (editor) { editor.destroy(); editor = null; }
     revokeBinURL();
     doc = new Y.Doc();
@@ -108,12 +128,7 @@
     doc.on("update", () => {
       if (self.host && window.Cloud) window.Cloud.scheduleSave(() => Y.encodeStateAsUpdate(doc));
     });
-    awareness.on("update", ({ added, updated, removed }, origin) => {
-      if (origin === REMOTE) return;
-      const changed = added.concat(updated, removed);
-      const payload = encodeAwarenessUpdate(awareness, changed);
-      send({ type: "doc.awareness", update: b64encode(payload) });
-    });
+    awareness.on("update", awarenessBroadcast);
     meta.observeDeep(() => renderTree());
     settings.observe(renderWorkspaceName);
     // Offline persistence rides the SAME doc. Its replayed updates carry the
