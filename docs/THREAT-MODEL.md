@@ -112,10 +112,32 @@ different trust boundary from cloud sync:
   copy never touches the network. The relay stays blind; peers still exchange
   only encrypted frames.
 
+## View-only (observer) sharing
+
+A **view-only link** (`#<phrase>?view`) has the joiner connect with parley's
+**observer** role: the host seats it as a spectator and announces that on the
+encrypted `ctl` roster. It's a **role**, not a second key — an observer still
+holds the group key (it must, to decrypt and view), so read-only is *enforced by
+the clients*, in three layers:
+
+- The observer's own client mounts the editor read-only and hides every write
+  path (typing, tree edits, uploads, name, AI, publish); it also never
+  broadcasts, and the core drops any document update from an observer self.
+- **Receivers** drop document updates that originate from any peer the host
+  seated as an observer — so even a tampered/buggy spectator client cannot mutate
+  an honest peer's copy.
+
+What this is **not**: it is not a cryptographic capability. Anyone with the
+phrase still has the group key and could, with a modified client, craft frames;
+honest peers ignore them, but the guarantee is "honest clients enforce it,"
+not "the protocol makes writing impossible." Share the plain link for editors,
+the `?view` link for watchers — but both links carry the same phrase.
+
 ## Non-goals
 
 - No server-side access control beyond phrase possession — anyone with the
-  phrase is a full participant and can read/write the workspace and its snapshot.
+  phrase is a participant (editor, or spectator via a view-only link) and, with a
+  modified client, could attempt to write; read-only is client-enforced (above).
 - No protection against a malicious *participant* (they hold the group key by
   design). No per-file ACLs.
 - No **server-readable** plaintext-at-rest: the relay and object store only ever

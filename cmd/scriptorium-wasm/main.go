@@ -51,9 +51,10 @@ func cloudMaterial(raw string) (sidHex, cloudKeyB64 string) {
 }
 
 type command struct {
-	Type   string `json:"type"`
-	Phrase string `json:"phrase,omitempty"`
-	Name   string `json:"name,omitempty"`
+	Type     string `json:"type"`
+	Phrase   string `json:"phrase,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Observer bool   `json:"observer,omitempty"` // join as a view-only spectator
 	// doc-service fields
 	FileID string `json:"fileID,omitempty"`
 	Update string `json:"update,omitempty"` // base64 opaque Yjs blob
@@ -96,7 +97,7 @@ func emitError(msg string) { emit("error", map[string]any{"message": msg}) }
 
 var commands = map[string]func(command){
 	"create":              func(c command) { create(c.Name) },
-	"join":                func(c command) { join(c.Phrase, c.Name) },
+	"join":                func(c command) { join(c.Phrase, c.Name, c.Observer) },
 	"leave":               func(command) { leave() },
 	"doc.update":          func(c command) { docUpdate(c.FileID, c.Update) },
 	"doc.awareness":       func(c command) { docAwareness(c.Update) },
@@ -109,6 +110,16 @@ func currentDoc() *doc.Service {
 	current.mu.Lock()
 	defer current.mu.Unlock()
 	return current.doc
+}
+
+// selfIsObserver reports whether this client was seated as a spectator. The
+// editor is already read-only in JS for observers; this is a belt-and-suspenders
+// guard so a JS bug can never push a document update onto the wire from a viewer.
+func selfIsObserver() bool {
+	current.mu.Lock()
+	c := current.client
+	current.mu.Unlock()
+	return c != nil && c.Role() == session.RoleObserver
 }
 
 func currentHuddle() *huddle.Service {
@@ -129,7 +140,7 @@ func huddleSignal(to uint32, kind, payload string) {
 
 func docUpdate(fileID, updateB64 string) {
 	d := currentDoc()
-	if d == nil {
+	if d == nil || selfIsObserver() {
 		return
 	}
 	raw, err := base64.StdEncoding.DecodeString(updateB64)
@@ -237,8 +248,9 @@ func reopenAsHost(phrase, name string) {
 	client, err := session.HostWithPhrase(ctx, relayURL(), phrase, proto.Options()...)
 	if err != nil {
 		// Race: someone created the session between our join and host — join it.
+		// (reopenAsHost only runs for non-observer joins, so join as a member.)
 		if strings.Contains(err.Error(), "exists") {
-			join(phrase, name)
+			join(phrase, name, false)
 			return
 		}
 		emitError("couldn't reopen the workspace: " + err.Error())
@@ -247,7 +259,7 @@ func reopenAsHost(phrase, name string) {
 	emitHosted(client, phrase, name, true)
 }
 
-func join(phrase, name string) {
+func join(phrase, name string, observer bool) {
 	phrase = strings.TrimSpace(phrase)
 	if phrase == "" {
 		emitError("enter a code phrase")
@@ -255,11 +267,20 @@ func join(phrase, name string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	client, err := session.Join(ctx, relayURL(), phrase, proto.Options()...)
+	opts := proto.Options()
+	if observer {
+		opts = append(opts, session.WithObserver())
+	}
+	client, err := session.Join(ctx, relayURL(), phrase, opts...)
 	if err != nil {
-		// No live session for this phrase → reopen it as host (restores any
-		// persisted cloud snapshot, else starts fresh).
 		if strings.Contains(err.Error(), "not found") {
+			// A view-only link is meant to watch a LIVE workspace — never silently
+			// promote a viewer to host. Only a normal joiner reopens (and restores
+			// any persisted cloud snapshot); an observer is told it isn't live.
+			if observer {
+				emitError("this workspace isn't open right now — ask the host to start it")
+				return
+			}
 			reopenAsHost(phrase, name)
 			return
 		}
@@ -275,7 +296,10 @@ func join(phrase, name string) {
 	}
 	start(client, name)
 	sid, cloudKey := cloudMaterial(phrase)
-	emit("session.joined", map[string]any{"self": uint32(client.Self()), "sid": sid, "cloudKey": cloudKey})
+	emit("session.joined", map[string]any{
+		"self": uint32(client.Self()), "sid": sid, "cloudKey": cloudKey,
+		"observer": client.Role() == session.RoleObserver,
+	})
 	if d := currentDoc(); d != nil {
 		_ = d.RequestCatchup()
 	}
@@ -325,14 +349,18 @@ func pump(mux *service.Mux, gen int) {
 		switch e := ev.(type) {
 		case service.Roster:
 			members := map[string]string{}
+			observers := []uint32{}
 			var host uint32
 			for id, role := range e.Members {
 				members[jsUint(id)] = e.Names[id]
-				if role == session.RoleHost {
+				switch role {
+				case session.RoleHost:
 					host = uint32(id)
+				case session.RoleObserver:
+					observers = append(observers, uint32(id))
 				}
 			}
-			emit("roster", map[string]any{"members": members, "host": host})
+			emit("roster", map[string]any{"members": members, "host": host, "observers": observers})
 		case doc.Update:
 			emit("doc.update", map[string]any{
 				"from": uint32(e.From), "fileID": e.FileID,

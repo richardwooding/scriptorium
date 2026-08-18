@@ -74,6 +74,7 @@
                aria-label="Workspace name" maxlength="80" spellcheck="false" autocomplete="off">
         <span id="presence" class="presence" aria-label="People here"></span>
         <span class="ws-spacer"></span>
+        <span id="readonly-badge" class="readonly-badge" hidden title="You joined with a view-only link — you can watch, but not edit">👁 View only</span>
         <span id="cloud-status" class="cloud-status gl-hint" hidden></span>
         <span id="publish-status" class="cloud-status gl-hint" hidden></span>
         <button class="gl-theme-toggle" data-gl-theme-toggle aria-label="Toggle light/dark theme" title="Toggle light/dark theme">
@@ -181,11 +182,12 @@
   <div id="invite-modal" class="modal" hidden>
     <div class="modal-card">
       <h2>Invite to this workspace</h2>
-      <p class="gl-hint">Anyone with the phrase can edit. It never leaves your browser except as a hash.</p>
+      <p class="gl-hint">Anyone with the phrase can edit. It never leaves your browser except as a hash. A <strong>view-only</strong> link lets people watch without editing.</p>
       <p class="phrase" id="invite-phrase"></p>
       <img id="invite-qr" alt="QR code for the workspace link" width="200" height="200">
       <div class="modal-actions">
         <button id="btn-copy-link" class="gl-btn primary">Copy link</button>
+        <button id="btn-copy-view-link" class="gl-btn ghost">Copy view-only link</button>
         <button id="btn-copy-phrase" class="gl-btn ghost">Copy phrase</button>
         <button id="btn-close-invite" class="gl-btn ghost">Done</button>
       </div>

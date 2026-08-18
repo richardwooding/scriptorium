@@ -15,6 +15,9 @@ design as its sibling [confab](https://github.com/richardwooding/confab).
 
 - **No accounts** — a phrase is the workspace link.
 - **E2EE** — edits are encrypted client-side; the relay forwards opaque frames.
+- **View-only sharing** — hand out a **read-only** link (Invite → *Copy view-only
+  link*) and people join as spectators: they watch live edits (and can join the
+  huddle) but can't type, upload, rename, delete, or run the assistant.
 - **Multi-file** — a tree of files/folders; highlight by extension; live
   markdown preview.
 - **Ephemeral by default, optionally persistent** — a workspace lives while

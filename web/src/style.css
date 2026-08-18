@@ -171,6 +171,19 @@ video.bin-media, audio.bin-media { width: 100%; }
 /* assistant-active presence: a subtle ✦ on the acting user's chip */
 .who.ai-active { box-shadow: 0 0 0 2px var(--gl-accent); }
 .ai-spark { position: absolute; margin: -0.9rem 0 0 -0.4rem; font-size: .6rem; color: var(--gl-accent); }
+/* view-only participant: a dimmed chip with a 👁 badge */
+.who.observer { opacity: .7; }
+.observer-eye { position: absolute; margin: 0.7rem 0 0 0.55rem; font-size: .6rem; }
+/* view-only mode (this client): hide every write affordance + show a badge */
+.readonly-badge {
+  font-size: .78rem; padding: .12rem .55rem; border-radius: 999px; white-space: nowrap;
+  color: var(--gl-accent); border: 1px solid color-mix(in srgb, var(--gl-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--gl-accent) 12%, transparent);
+}
+#view-workspace.read-only .tree-actions,
+#view-workspace.read-only .tn-del,
+#view-workspace.read-only #btn-ai,
+#view-workspace.read-only #btn-publish { display: none; }
 /* per-file presence: tiny peer avatars on the tab/tree of the file they view */
 .viewing-avatars { display: inline-flex; align-items: center; gap: 1px; margin-left: .35rem; flex: 0 0 auto; }
 .who-mini {

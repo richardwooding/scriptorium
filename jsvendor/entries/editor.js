@@ -119,9 +119,14 @@ const language = new Compartment();
 const theme = new Compartment();
 
 window.CMEditor = {
-  // create({parent, ytext, awareness, path, theme}) → { view, setLanguage(path), setTheme(mode), destroy() }
-  create({ parent, ytext, awareness, path, theme: mode }) {
+  // create({parent, ytext, awareness, path, theme, readOnly}) → { view, setLanguage(path), setTheme(mode), setReadOnly(bool), destroy() }
+  create({ parent, ytext, awareness, path, theme: mode, readOnly }) {
     const initial = mode === "light" || mode === "dark" ? mode : effectiveTheme();
+    // A view-only (observer) mount: EditorState.readOnly blocks user input while
+    // EditorView.editable false drops the caret/contentEditable, yet yCollab
+    // remote updates still flow in — so an observer sees live edits, read-only.
+    const roExt = (on) => (on ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []);
+    const readOnlyComp = new Compartment();
     const view = new EditorView({
       parent,
       state: EditorState.create({
@@ -134,6 +139,7 @@ window.CMEditor = {
                      ...historyKeymap, ...completionKeymap, indentWithTab]),
           theme.of(themeExt(initial)),
           language.of(langForExt(extOf(path))),
+          readOnlyComp.of(roExt(!!readOnly)),
           // yCollab binds the editor to the Y.Text and renders remote cursors
           // from awareness; it also feeds local edits back into the Y.Doc.
           yCollab(ytext, awareness),
@@ -146,6 +152,7 @@ window.CMEditor = {
       // Hot-swap the theme + syntax palette without rebuilding the view, so the
       // cursor, selection, and yCollab binding survive a light/dark flip.
       setTheme(m) { view.dispatch({ effects: theme.reconfigure(themeExt(m === "light" ? "light" : "dark")) }); },
+      setReadOnly(on) { view.dispatch({ effects: readOnlyComp.reconfigure(roExt(!!on)) }); },
       destroy() { view.destroy(); },
     };
   },

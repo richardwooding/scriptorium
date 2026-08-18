@@ -63,6 +63,12 @@
   let persistenceReady = Promise.resolve(); // resolves once IndexedDB has replayed
   let sessionKey = null;         // per-session store key (SessionID hex)
   let offlineEnabled = true;     // user toggle (persisted: scriptorium-offline)
+  // View-only (observer) mode: this client joined via a read-only share link, so
+  // it may watch and hear but never write. Enforcement is layered — read-only
+  // editor + hidden write UI here, the core drops our doc.update on the wire, and
+  // receivers drop updates that originate from a known-observer peer (below).
+  let readOnly = false;          // are WE a spectator?
+  let observerIds = new Set();   // parley ids the host seated as observers
 
   // ---- lifecycle ---------------------------------------------------------
   function reset() {
@@ -93,7 +99,7 @@
     // Local edits → broadcast; peer-applied (REMOTE) updates are ignored so we
     // don't echo. seq/size safety lives in the Go service, not here.
     doc.on("update", (update, origin) => {
-      if (origin === REMOTE) return;
+      if (origin === REMOTE || readOnly) return; // observers never broadcast
       send({ type: "doc.update", fileID: WS, update: b64encode(update) });
     });
     // Cloud autosave (host only): the host is the single writer that persists
@@ -249,6 +255,31 @@
   }
   function setHost(isHost) { self.host = !!isHost; }
 
+  // Enter/leave view-only mode. Hides write controls (a `.read-only` class on the
+  // workspace view drives the CSS), locks the name field + editor, and shows the
+  // "View only" badge. The editor may not be mounted yet (mountEditor reads the
+  // flag), so this reconfigures a live editor when present and is idempotent.
+  function setReadOnly(on) {
+    readOnly = !!on;
+    const root = el("view-workspace");
+    if (root) root.classList.toggle("read-only", readOnly);
+    const nm = el("ws-name");
+    if (nm) nm.readOnly = readOnly;
+    const badge = el("readonly-badge");
+    if (badge) badge.hidden = !readOnly;
+    if (editor && editor.setReadOnly) editor.setReadOnly(readOnly);
+    renderPresence();
+  }
+  function isReadOnly() { return readOnly; }
+  // The host-assigned roster tells everyone which participants are spectators —
+  // authoritative (a peer can't lie its way out of it). Used to badge them in
+  // presence AND to drop any doc.update a spectator manages to put on the wire.
+  function setObservers(ids) {
+    observerIds = new Set((ids || []).map(Number));
+    renderPresence();
+    scheduleViewingAvatars();
+  }
+
   // A brand-new workspace gets one starter file so there's something to type in.
   function seedIfEmpty() {
     if (meta.size > 0) return;
@@ -261,7 +292,11 @@
   }
 
   // ---- inbound from peers (via app.js) -----------------------------------
-  function applyUpdate(_fileID, b64) {
+  function applyUpdate(_fileID, b64, from) {
+    // A spectator must not be able to mutate the shared doc even by crafting
+    // frames (it holds the group key to view). Drop updates from any peer the
+    // host seated as an observer — the read-only guarantee holds for everyone.
+    if (from !== undefined && observerIds.has(Number(from))) return;
     try { Y.applyUpdate(doc, b64decode(b64), REMOTE); }
     catch (e) { console.warn("[doc] bad update", e); }
   }
@@ -440,6 +475,7 @@
     return wrap;
   }
   function promptRename(id) {
+    if (readOnly) return;
     const n = meta.get(id);
     if (!n) return;
     const name = window.prompt("Rename", n.name);
@@ -528,6 +564,7 @@
       awareness,
       path: n ? n.name : "",
       theme: window.CMEditor.effectiveTheme(),
+      readOnly,
     });
   }
   // Re-theme the live editor when the (OS or explicit) color scheme changes.
@@ -680,10 +717,12 @@
       chip.className = "who" + (ai ? " ai-active" : "");
       chip.style.background = u.color || "#6e7681";
       const who = u.name || "someone";
+      const isObserver = observerIds.has(Number(u.pid));
       const viewing = st && st.file ? " · " + idToPath(st.file) : "";
       chip.title = ai
         ? who + (ai.file ? " · assistant editing " + ai.file : " · assistant working")
-        : (hud ? who + " · in the huddle" + (st.huddle.muted ? " (muted)" : "") : who + viewing);
+        : (hud ? who + " · in the huddle" + (st.huddle.muted ? " (muted)" : "") : who + (isObserver ? " · view-only" : "") + viewing);
+      if (isObserver) chip.classList.add("observer");
       chip.textContent = (u.name || "?").slice(0, 1).toUpperCase();
       if (ai) {
         // subtle indicator so collaborators see an assistant is touching files
@@ -698,6 +737,13 @@
         mic.className = "huddle-mic";
         mic.textContent = st.huddle.muted ? "🔇" : "🎙";
         chip.appendChild(mic);
+      }
+      if (isObserver) {
+        // 👁 badge so collaborators see who is watching read-only
+        const eye = document.createElement("span");
+        eye.className = "observer-eye";
+        eye.textContent = "👁";
+        chip.appendChild(eye);
       }
       box.appendChild(chip);
     });
@@ -1052,6 +1098,7 @@
   // Upload handler: import File objects — valid-UTF-8 text becomes an editable
   // Y.Text file; everything else becomes a view-only binary blob.
   async function importFiles(fileList, parent) {
+    if (readOnly) return; // covers the upload button AND drag-drop
     const files = Array.from(fileList || []);
     let lastId = null, errs = [];
     for (const f of files) {
@@ -1146,6 +1193,8 @@
     cloudRestore,
     // offline persistence: per-session store key + load barrier (app.js)
     setSession, whenReady,
+    // view-only / observer mode (app.js: setReadOnly on join, setObservers on roster)
+    setReadOnly, isReadOnly, setObservers,
     // huddle voice-chat membership (huddle.js)
     setHuddle, registerHuddleObserver,
     // binary files: upload/store/read raw bytes (used by uploads, download.js, assistant.js)

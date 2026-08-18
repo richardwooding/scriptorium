@@ -14,6 +14,16 @@
   let hostId = -1;
   let phrase = "";
   let shareLink = "";
+  let pendingView = false; // next join should be view-only (came from a ?view link)
+
+  // A view-only share link keeps the phrase in the fragment (never sent to the
+  // server) and marks the mode with `?view`: `#<phrase>?view`. Parse both out.
+  function parseHash() {
+    const raw = location.hash.replace(/^#/, "");
+    const q = raw.indexOf("?");
+    if (q < 0) return { phrase: raw, view: false };
+    return { phrase: raw.slice(0, q), view: new URLSearchParams(raw.slice(q + 1)).has("view") };
+  }
 
   // A stable, pleasant colour per participant id (for cursors/presence).
   function colorFor(id) {
@@ -44,7 +54,7 @@
   function refreshAction() {
     const btn = el("btn-action");
     const has = (el("join-phrase").value || "").trim().length > 0;
-    btn.textContent = has ? "→ Join workspace" : "▶ New workspace";
+    btn.textContent = has ? (pendingView ? "→ View (read-only)" : "→ Join workspace") : "▶ New workspace";
     btn.disabled = !coreReady;
   }
   function doAction() {
@@ -52,18 +62,19 @@
     const p = (el("join-phrase").value || "").trim();
     const name = nameInput();
     Workspace.setSend(send);
-    if (p) send({ type: "join", phrase: p, name });
+    if (p) send({ type: "join", phrase: p, name, observer: pendingView });
     else send({ type: "create", name });
     el("btn-action").disabled = true;
-    el("home-status").textContent = p ? "joining…" : "starting an encrypted workspace…";
+    el("home-status").textContent = p ? (pendingView ? "opening view-only…" : "joining…") : "starting an encrypted workspace…";
   }
 
   // ---- session lifecycle -------------------------------------------------
-  function enterWorkspace(isHost) {
+  function enterWorkspace(isHost, observer) {
     Workspace.reset();
     Workspace.setSend(send);
     Workspace.setSelf({ name: nameInput() || "anon", color: colorFor(selfId), pid: selfId });
     Workspace.setHost(isHost);
+    Workspace.setReadOnly(!!observer);
     showWorkspace();
     if (isHost) {
       // Host restores an encrypted cloud snapshot (if any) before seeding /
@@ -82,13 +93,15 @@
     }
     // The AI assistant is a local, browser-only feature: it talks to the user's
     // own provider directly and edits files via Workspace. Fresh per session.
-    if (window.Assistant) {
+    // Observers are view-only — skip write features entirely (their buttons are
+    // also hidden by the .read-only CSS).
+    if (window.Assistant && !observer) {
       Assistant.init({ workspace: Workspace, self: { name: nameInput() || "anon", pid: selfId } });
     }
     // Publish is a local, browser-only feature: it pushes the workspace straight
     // to GitHub with the user's own token (relay never in the loop), then Actions
     // builds & publishes. Fresh per session.
-    if (window.Publish) Publish.init({ workspace: Workspace });
+    if (window.Publish && !observer) Publish.init({ workspace: Workspace });
     // The huddle (WebRTC voice) meshes peers over the same session; signaling
     // rides the core, audio is P2P. Fresh per session. The send wrapper adapts
     // huddle.js's (to,kind,payload) calls to the bridge's huddle.signal command.
@@ -116,17 +129,18 @@
   }
   function onJoined(e) {
     selfId = e.self >>> 0;
-    if (window.Cloud) Cloud.configure(e.sid, e.cloudKey);
+    if (window.Cloud && !e.observer) Cloud.configure(e.sid, e.cloudKey);
     Workspace.setSession(e.sid); // scope the offline store before reset() attaches it
-    enterWorkspace(false);
+    enterWorkspace(false, !!e.observer);
     if (!location.hash) history.replaceState({ phrase: joinedPhrase() }, "", "#" + joinedPhrase());
-    el("home-status").textContent = "catching up…";
+    el("home-status").textContent = e.observer ? "viewing (read-only)…" : "catching up…";
   }
   function joinedPhrase() { return (el("join-phrase").value || "").trim(); }
 
   function onRoster(e) {
     hostId = e.host >>> 0;
     Workspace.setHost(hostId === selfId);
+    Workspace.setObservers(e.observers || []);
   }
 
   function onClosed(reason) {
@@ -145,7 +159,7 @@
     "session.created": onCreated,
     "session.joined": onJoined,
     "roster": onRoster,
-    "doc.update": (e) => Workspace.applyUpdate(e.fileID, e.update),
+    "doc.update": (e) => Workspace.applyUpdate(e.fileID, e.update, e.from >>> 0),
     "doc.awareness": (e) => Workspace.applyAwareness(e.from, e.update),
     "doc.catchup.request": (e) => Workspace.onCatchupRequest(e.from >>> 0),
     "doc.catchup.end": (e) => Workspace.onCatchupEnd(e.from >>> 0),
@@ -179,17 +193,20 @@
   // closing the tab tears the session down (reconnect = re-enter the phrase).
   function wireNav() {
     window.addEventListener("hashchange", () => {
-      const p = location.hash.replace(/^#/, "");
+      const { phrase: p, view } = parseHash();
       if (p && !isInWorkspace()) {
         el("join-phrase").value = p;
+        pendingView = view;
         refreshAction();
         doAction();
       }
     });
     window.addEventListener("pagehide", () => { if (isInWorkspace()) { if (window.Huddle) Huddle.leave(); send({ type: "leave" }); } });
-    // Deep-link on first load.
+    // Deep-link on first load (pre-fills; the user clicks to join/view).
     if (location.hash.length > 1) {
-      el("join-phrase").value = location.hash.slice(1);
+      const { phrase: p, view } = parseHash();
+      el("join-phrase").value = p;
+      pendingView = view;
     }
   }
   function isInWorkspace() { return !el("view-workspace").classList.contains("hidden"); }
@@ -197,7 +214,9 @@
   // ---- wiring ------------------------------------------------------------
   function boot() {
     Workspace.wireControls();
-    el("join-phrase").addEventListener("input", refreshAction);
+    // Typing a phrase by hand is an edit-join; clear any view-only intent that a
+    // ?view link set so the manual join isn't silently downgraded to read-only.
+    el("join-phrase").addEventListener("input", () => { pendingView = false; refreshAction(); });
     el("btn-action").addEventListener("click", doAction);
     el("btn-invite").addEventListener("click", openInvite);
     el("btn-download").addEventListener("click", async () => {
@@ -210,6 +229,11 @@
     el("btn-close-invite").addEventListener("click", closeInvite);
     el("btn-copy-link").addEventListener("click", () => copy(shareLink, "link copied"));
     el("btn-copy-phrase").addEventListener("click", () => copy(phrase, "phrase copied"));
+    // A view-only link is the same fragment with a ?view marker — joiners open it
+    // as read-only spectators (they can watch and hear, but never edit).
+    if (el("btn-copy-view-link")) {
+      el("btn-copy-view-link").addEventListener("click", () => copy(shareLink ? shareLink + "?view" : "", "view-only link copied"));
+    }
     el("btn-leave").addEventListener("click", () => { if (window.Huddle) Huddle.leave(); send({ type: "leave" }); });
     // Chat is a fast-follow (needs the parley chat service wired into the core);
     // hide its controls until then rather than show dead UI.
