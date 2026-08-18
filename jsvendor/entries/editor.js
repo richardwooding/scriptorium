@@ -6,8 +6,13 @@
 // creates docs with the same window.Y this file binds against.
 import * as Y from "yjs";
 import { Awareness, encodeAwarenessUpdate, applyAwarenessUpdate, removeAwarenessStates } from "y-protocols/awareness.js";
+// y-indexeddb rides THIS bundle so it shares the one Yjs above — a second Yjs
+// copy would make its instanceof checks fail. workspace.js attaches it to the
+// window.Y-created doc for offline-first, plaintext-at-rest local persistence.
+import { IndexeddbPersistence } from "y-indexeddb";
 window.Y = Y;
 window.YProto = { Awareness, encodeAwarenessUpdate, applyAwarenessUpdate, removeAwarenessStates };
+window.YIndexeddb = IndexeddbPersistence;
 
 import { EditorState, Compartment } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection } from "@codemirror/view";

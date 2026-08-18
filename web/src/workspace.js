@@ -55,6 +55,14 @@
   let previewEnabled = true; // user toggle for the preview pane (persisted)
   let huddleObserver = null; // huddle.js callback: who's in the voice huddle
   let binURL = null;         // object URL of the currently-shown binary viewer
+  // Offline-first: persist the Y.Doc to IndexedDB so a reload — or going
+  // offline — keeps local state and merges back (CRDT) on reconnect. The local
+  // copy is PLAINTEXT at rest (unlike the phrase-encrypted cloud snapshot), so
+  // it's user-toggleable; turning it off deletes the store. Default on.
+  let persistence = null;        // IndexeddbPersistence for the current doc
+  let persistenceReady = Promise.resolve(); // resolves once IndexedDB has replayed
+  let sessionKey = null;         // per-session store key (SessionID hex)
+  let offlineEnabled = true;     // user toggle (persisted: scriptorium-offline)
 
   // ---- lifecycle ---------------------------------------------------------
   function reset() {
@@ -102,10 +110,79 @@
     });
     meta.observeDeep(() => renderTree());
     settings.observe(renderWorkspaceName);
+    // Offline persistence rides the SAME doc. Its replayed updates carry the
+    // provider's own origin (not REMOTE), so the broadcaster above re-sends them
+    // once on load — that's how a joiner's offline edits reach the host on
+    // reconnect (idempotent CRDT merge); the host serves its own state via
+    // catch-up regardless. seedIfEmpty must await whenReady() so we don't seed a
+    // second README on top of a store that's still loading.
+    attachPersistence();
     renderTree();
     renderTabs();
     updateEmptyHint();
     renderWorkspaceName();
+  }
+
+  // ---- offline persistence (y-indexeddb) ---------------------------------
+  // Attach a fresh IndexeddbPersistence to the current doc, scoped to the
+  // session so different phrases never share a store. Idempotent-ish: it first
+  // tears down any prior provider (from the previous session's doc). No-op when
+  // the toggle is off, there's no session yet, or IndexedDB / the bundle is
+  // unavailable (e.g. private-mode browsers).
+  function attachPersistence() {
+    detachPersistence(false);
+    persistenceReady = Promise.resolve();
+    if (!offlineEnabled || !sessionKey || !doc) return;
+    if (!window.YIndexeddb || !window.indexedDB) return;
+    try {
+      persistence = new window.YIndexeddb("scriptorium:" + sessionKey, doc);
+      // Swallow load errors so a corrupt store never blocks starting fresh.
+      persistenceReady = persistence.whenSynced.then(() => {}, () => {});
+    } catch (_) { persistence = null; }
+  }
+  // Detach the provider. clear=true also DELETES the local store (used when the
+  // user turns offline off); clear=false just stops persisting (session change).
+  function detachPersistence(clear) {
+    if (!persistence) return;
+    const p = persistence;
+    persistence = null;
+    try {
+      if (clear && typeof p.clearData === "function") p.clearData().catch(() => {});
+      else p.destroy();
+    } catch (_) { /* best effort */ }
+  }
+  // Resolves once the local store has replayed into the doc (or immediately when
+  // persistence is off). Host open gates seedIfEmpty on this + cloudRestore.
+  function whenReady() { return persistenceReady; }
+  // Per-session store key (SessionID hex), set by app.js before reset().
+  function setSession(sid) { sessionKey = sid || null; }
+
+  // Toggle offline persistence. Turning it OFF deletes the plaintext local copy
+  // (after a confirm, since it's a deliberate data-destroying action). Turning
+  // it ON attaches to the live doc immediately, capturing current state.
+  function setOffline(on) {
+    on = !!on;
+    if (on === offlineEnabled) { updateOfflineToggle(); return; }
+    if (!on && persistence &&
+        !confirm("Turn off the offline copy and delete this workspace's local copy from this browser? Your work stays in the live session.")) {
+      updateOfflineToggle();
+      return;
+    }
+    offlineEnabled = on;
+    try { localStorage.setItem("scriptorium-offline", on ? "1" : "0"); } catch (_) { /* private mode */ }
+    if (on) attachPersistence();
+    else detachPersistence(true);
+    updateOfflineToggle();
+  }
+  function toggleOffline() { setOffline(!offlineEnabled); }
+  function updateOfflineToggle() {
+    const b = el("btn-offline");
+    if (!b) return;
+    b.setAttribute("aria-pressed", offlineEnabled ? "true" : "false");
+    b.classList.toggle("on", offlineEnabled);
+    b.title = offlineEnabled
+      ? "Offline copy on — this workspace is saved in this browser (plaintext) so reloads and offline work. Click to turn off and delete it."
+      : "Offline copy off — nothing is stored in this browser. Click to keep a local copy for reloads and offline editing.";
   }
 
   // ---- workspace name (shared, synced via the settings map) --------------
@@ -691,6 +768,16 @@
     const pvc = el("btn-preview-close");
     if (pvc) pvc.addEventListener("click", () => setPreviewEnabled(false));
     updatePreviewToggle(null);
+    // Offline copy on/off (persisted preference; default on). Off deletes the
+    // local store — see setOffline. Disable the control where IndexedDB / the
+    // provider isn't available so it never lies about persisting.
+    try { if (localStorage.getItem("scriptorium-offline") === "0") offlineEnabled = false; } catch (_) { /* private mode */ }
+    const off = el("btn-offline");
+    if (off) {
+      if (!window.YIndexeddb || !window.indexedDB) { off.disabled = true; off.title = "Offline copy unavailable in this browser"; }
+      else off.addEventListener("click", toggleOffline);
+    }
+    updateOfflineToggle();
     // Editable workspace name (shared). Debounced so we don't broadcast every
     // keystroke; the settings map is last-writer-wins on a short string.
     const nameEl = el("ws-name");
@@ -1057,6 +1144,8 @@
     setName: setWorkspaceName, getName: getWorkspaceName,
     // cloud sync: host restores an encrypted snapshot on open (cloud.js)
     cloudRestore,
+    // offline persistence: per-session store key + load barrier (app.js)
+    setSession, whenReady,
     // huddle voice-chat membership (huddle.js)
     setHuddle, registerHuddleObserver,
     // binary files: upload/store/read raw bytes (used by uploads, download.js, assistant.js)

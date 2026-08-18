@@ -70,7 +70,13 @@
       // serving catch-up, so peers catch up on the persisted state. seedIfEmpty
       // is a no-op when the restore populated the doc; it runs when there was
       // nothing stored (or cloud is dormant).
-      Workspace.cloudRestore().then(function (restored) { if (!restored) Workspace.seedIfEmpty(); });
+      // Wait for the offline store to replay (whenReady) AND the cloud restore
+      // before deciding to seed — otherwise seedIfEmpty (guards only on a sync
+      // meta.size check) would plant a second README on top of a store still
+      // loading from IndexedDB.
+      Workspace.whenReady()
+        .then(function () { return Workspace.cloudRestore(); })
+        .then(function (restored) { if (!restored) Workspace.seedIfEmpty(); });
     } else {
       el("home-status").textContent = "";
     }
@@ -100,6 +106,7 @@
     phrase = e.phrase;
     shareLink = e.url;
     if (window.Cloud) Cloud.configure(e.sid, e.cloudKey);
+    Workspace.setSession(e.sid); // scope the offline store before reset() attaches it
     enterWorkspace(true);
     setInvite(e.phrase, e.url, e.qr);
     history.replaceState({ phrase }, "", "#" + phrase);
@@ -110,6 +117,7 @@
   function onJoined(e) {
     selfId = e.self >>> 0;
     if (window.Cloud) Cloud.configure(e.sid, e.cloudKey);
+    Workspace.setSession(e.sid); // scope the offline store before reset() attaches it
     enterWorkspace(false);
     if (!location.hash) history.replaceState({ phrase: joinedPhrase() }, "", "#" + joinedPhrase());
     el("home-status").textContent = "catching up…";

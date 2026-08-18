@@ -88,11 +88,36 @@ presigned PUT or GET URL.
   network service): refuse to sign, or the store could drop/serve-stale an
   object. None of these reveal plaintext.
 
+## Offline persistence (local, PLAINTEXT at rest) — optional, on by default
+
+To make scriptorium genuinely offline-first, the browser persists the workspace
+Y.Doc to **IndexedDB** (via `y-indexeddb`) so a reload — or going offline — keeps
+your local state, which merges back automatically (CRDT) on reconnect. This is a
+different trust boundary from cloud sync:
+
+- **The local copy is plaintext.** Unlike the Tigris snapshot (ciphertext, keyed
+  by the phrase), the IndexedDB store holds the workspace *decrypted* — it's your
+  own device's working copy, so anyone with access to that browser profile can
+  read it. This is the same posture as the AI key and GitHub token, which also
+  live in the browser (`localStorage`).
+- **Scoped per session.** The store is named `scriptorium:<SessionID>` (the
+  SessionID is a hash of the phrase, never the phrase itself), so distinct
+  phrases never share a store.
+- **User-controllable.** The topbar **⚑ Offline** toggle turns it off; turning it
+  off **deletes** the local store immediately (`clearData()`). The preference is
+  remembered (`localStorage["scriptorium-offline"]`). On a shared or untrusted
+  machine, turn it off — nothing is then written to disk. It never sends anything
+  to the relay or any peer; it's purely local.
+- **Nothing leaves the device.** IndexedDB is a browser storage API — the local
+  copy never touches the network. The relay stays blind; peers still exchange
+  only encrypted frames.
+
 ## Non-goals
 
 - No server-side access control beyond phrase possession — anyone with the
   phrase is a full participant and can read/write the workspace and its snapshot.
 - No protection against a malicious *participant* (they hold the group key by
   design). No per-file ACLs.
-- No plaintext-at-rest anywhere: if you need server-readable persistence, this
-  isn't it.
+- No **server-readable** plaintext-at-rest: the relay and object store only ever
+  see ciphertext. (The optional **local** IndexedDB copy above is plaintext, but
+  it never leaves your browser and can be turned off.)
