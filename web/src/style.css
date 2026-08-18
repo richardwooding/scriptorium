@@ -248,9 +248,27 @@ video.bin-media, audio.bin-media { width: 100%; }
 .ai-undo { align-self: flex-start; font-size: .8rem; }
 .ai-form #ai-input { flex: 1; }
 
+/* approve-diff: proposed-change card with Apply/Skip */
+.ai-diff { border: 1px solid var(--gl-border); border-radius: 10px; background: var(--gl-bg); overflow: hidden; font-size: .82rem; }
+.ai-diff-op + .ai-diff-op { border-top: 1px solid var(--gl-border); }
+.ai-diff-head { font-family: ui-monospace, monospace; font-size: .78rem; color: var(--gl-fg-dim); padding: .35rem .55rem; background: var(--gl-panel); overflow-wrap: anywhere; }
+.ai-diff-body { font-family: ui-monospace, monospace; font-size: .76rem; line-height: 1.45; max-height: 18rem; overflow: auto; padding: .2rem 0; }
+.ai-diff-line { white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 .55rem; }
+.ai-diff-add { color: var(--gl-green, #3fb950); background: color-mix(in srgb, var(--gl-green, #3fb950) 12%, transparent); }
+.ai-diff-del { color: #ff7b72; background: color-mix(in srgb, #ff7b72 12%, transparent); }
+.ai-diff-ctx { color: var(--gl-fg-dim); }
+.ai-diff-note { font-size: .74rem; color: var(--gl-fg-dim); font-style: italic; padding: .15rem .55rem; }
+.ai-diff-actions { display: flex; gap: .4rem; padding: .45rem .55rem; border-top: 1px solid var(--gl-border); }
+.ai-diff-actions .gl-btn { padding: .35rem .8rem; font-size: .82rem; }
+.ai-diff-result { font-size: .78rem; padding: .4rem .55rem; border-top: 1px solid var(--gl-border); }
+.ai-diff-applied { color: var(--gl-green, #3fb950); }
+.ai-diff-skipped { color: var(--gl-fg-dim); }
+
 /* assistant settings modal */
 .ai-settings-card { text-align: left; max-width: 26rem; }
 .ai-settings-card label { display: block; font-size: .8rem; color: var(--gl-fg-dim); margin: .7rem 0 .3rem; }
+.ai-settings-card label.ai-check { display: flex; gap: .5rem; align-items: flex-start; font-size: .78rem; line-height: 1.4; cursor: pointer; }
+.ai-settings-card label.ai-check input { margin-top: .15rem; flex: 0 0 auto; }
 .ai-field { width: 100%; box-sizing: border-box; padding: .5rem .6rem; background: var(--gl-bg); color: var(--gl-fg); border: 1px solid var(--gl-border); border-radius: 8px; font: inherit; }
 .ai-field:focus-visible { outline: 2px solid var(--gl-accent); outline-offset: 1px; }
 

@@ -23,6 +23,7 @@
     key: "scriptorium-ai-key",
     base: "scriptorium-ai-base",
     model: "scriptorium-ai-model",
+    approve: "scriptorium-ai-approve", // review each edit as a diff before applying
   };
   const lsGet = (k) => { try { return localStorage.getItem(k); } catch (_) { return null; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (_) { /* private mode */ } };
@@ -36,6 +37,7 @@
       key: lsGet(KEYS.key) || "",
       base: lsGet(KEYS.base) || "https://api.openai.com/v1",
       model: lsGet(KEYS.model) || DEFAULT_MODEL[provider] || "",
+      approve: lsGet(KEYS.approve) === "1",
     };
   }
   const isConfigured = () => !!config().key;
@@ -46,6 +48,7 @@
   let history = [];            // provider-neutral message log (see below)
   let running = false;
   let stopped = false;
+  let pendingApproval = null;  // resolver for an in-flight approve-diff card (or null)
 
   // Neutral message shapes in `history`:
   //   { role:"user", text }
@@ -97,10 +100,29 @@
     return btoa(s);
   };
 
+  // Tools that mutate the shared doc — gated behind approve-diff when enabled.
+  const MUTATORS = new Set([
+    "edit_file", "write_file", "create_file", "write_files",
+    "make_dir", "move_file", "rename_file", "delete_file",
+  ]);
+
   // Execute one tool call against the Workspace. Returns { output, isError, image? }.
-  function execTool(tc, actions) {
+  // Async so a mutating tool can pause for the user's Apply/Skip in approve mode.
+  async function execTool(tc, actions) {
     const a = W.ai;
     const p = tc.input || {};
+    // Approve-diff: show the proposed change and wait for Apply/Skip BEFORE any
+    // doc mutation. On skip (or Stop), nothing is applied and the model is told.
+    if (config().approve && MUTATORS.has(tc.name)) {
+      let proposal;
+      try { proposal = a.preview(tc.name, p); }
+      catch (e) { return { output: "Error (nothing applied): " + (e && e.message ? e.message : String(e)), isError: true }; }
+      const decision = await renderProposal(tc.name, proposal);
+      if (decision !== "apply") {
+        return { output: "The user reviewed this change and SKIPPED it — it was NOT applied. Respect their choice; do not retry it.", isError: false };
+      }
+      // approved → fall through to the normal switch, which applies it as usual
+    }
     try {
       switch (tc.name) {
         case "list_files": return { output: JSON.stringify(a.list()) };
@@ -415,7 +437,7 @@
         if (!toolCalls.length) break;
         const results = [];
         for (const tc of toolCalls) {
-          const out = execTool(tc, actions);
+          const out = await execTool(tc, actions);
           results.push({ id: tc.id, name: tc.name, output: out.output, isError: out.isError, image: out.image });
         }
         history.push({ role: "tool", results });
@@ -504,6 +526,114 @@
     });
     log.appendChild(btn); scrollLog();
   }
+  // ---- approve-diff: line diff + proposal card ---------------------------
+  // Minimal LCS line diff → [{type:"ctx"|"add"|"del", text}]. Returns null for
+  // very large files (O(n*m) guard) so a huge write can't freeze the UI.
+  function lineDiff(before, after) {
+    const a = before ? before.split("\n") : [];
+    const b = after ? after.split("\n") : [];
+    const m = a.length, n = b.length;
+    if (m > 1500 || n > 1500) return null;
+    const dp = Array.from({ length: m + 1 }, () => new Uint32Array(n + 1));
+    for (let i = m - 1; i >= 0; i--) {
+      for (let j = n - 1; j >= 0; j--) {
+        dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+    const out = [];
+    let i = 0, j = 0;
+    while (i < m && j < n) {
+      if (a[i] === b[j]) { out.push({ type: "ctx", text: a[i] }); i++; j++; }
+      else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push({ type: "del", text: a[i] }); i++; }
+      else { out.push({ type: "add", text: b[j] }); j++; }
+    }
+    while (i < m) out.push({ type: "del", text: a[i++] });
+    while (j < n) out.push({ type: "add", text: b[j++] });
+    return out;
+  }
+  function opHeadText(op) {
+    switch (op.kind) {
+      case "edit": return "✎ edit " + op.path;
+      case "write": return "✎ overwrite " + op.path;
+      case "create": return "✚ create " + op.path;
+      case "delete": return "🗑 delete " + op.path;
+      case "rename": return "→ rename " + op.path + " → " + op.newPath;
+      case "mkdir": return "📁 new folder " + op.path;
+      default: return op.path || "change";
+    }
+  }
+  function renderOp(op) {
+    const box = document.createElement("div");
+    box.className = "ai-diff-op";
+    const head = document.createElement("div");
+    head.className = "ai-diff-head";
+    head.textContent = opHeadText(op);
+    box.appendChild(head);
+    if (op.kind === "rename" || op.kind === "mkdir") return box; // header says it all
+    const body = document.createElement("div");
+    body.className = "ai-diff-body";
+    const rows = lineDiff(op.before || "", op.after || "");
+    if (!rows) {
+      const note = document.createElement("div");
+      note.className = "ai-diff-note";
+      const bl = (op.before || "").split("\n").length, al = (op.after || "").split("\n").length;
+      note.textContent = "large file — " + bl + " → " + al + " lines (diff hidden)";
+      body.appendChild(note);
+    } else {
+      const CAP = 300;
+      for (const r of rows.slice(0, CAP)) {
+        const line = document.createElement("div");
+        line.className = "ai-diff-line ai-diff-" + r.type;
+        line.textContent = (r.type === "add" ? "+ " : r.type === "del" ? "- " : "  ") + r.text;
+        body.appendChild(line);
+      }
+      if (rows.length > CAP) {
+        const more = document.createElement("div");
+        more.className = "ai-diff-note";
+        more.textContent = "… " + (rows.length - CAP) + " more lines";
+        body.appendChild(more);
+      }
+    }
+    box.appendChild(body);
+    return box;
+  }
+  // Render a proposal card with Apply/Skip; resolves "apply" or "skip". Stop (or
+  // a lost pane) settles it as "skip". Records the resolver in pendingApproval so
+  // the Stop button can cancel a diff that's waiting on the user.
+  function renderProposal(name, proposal) {
+    return new Promise((resolve) => {
+      const log = el("ai-log");
+      if (!log) { resolve("skip"); return; }
+      const card = document.createElement("div");
+      card.className = "ai-diff";
+      for (const op of (proposal && proposal.ops) || []) card.appendChild(renderOp(op));
+      const actions = document.createElement("div");
+      actions.className = "ai-diff-actions";
+      const apply = document.createElement("button");
+      apply.className = "gl-btn primary"; apply.textContent = "Apply";
+      const skip = document.createElement("button");
+      skip.className = "gl-btn ghost"; skip.textContent = "Skip";
+      actions.appendChild(apply); actions.appendChild(skip);
+      card.appendChild(actions);
+      log.appendChild(card); scrollLog();
+
+      let settled = false;
+      const finish = (decision) => {
+        if (settled) return;
+        settled = true;
+        pendingApproval = null;
+        actions.remove();
+        const tag = document.createElement("div");
+        tag.className = "ai-diff-result ai-diff-" + (decision === "apply" ? "applied" : "skipped");
+        tag.textContent = decision === "apply" ? "✓ Applied" : "⊘ Skipped";
+        card.appendChild(tag); scrollLog();
+        resolve(decision);
+      };
+      apply.addEventListener("click", () => finish("apply"));
+      skip.addEventListener("click", () => finish("skip"));
+      pendingApproval = () => finish("skip");
+    });
+  }
   function setBusy(busy) {
     const send = el("ai-send"), stop = el("ai-stop"), input = el("ai-input");
     if (send) send.hidden = busy;
@@ -528,6 +658,7 @@
     if (el("ai-base")) el("ai-base").value = lsGet(KEYS.base) || "";
     if (el("ai-key")) el("ai-key").value = cfg.key;
     if (el("ai-model")) el("ai-model").value = lsGet(KEYS.model) || "";
+    if (el("ai-approve")) el("ai-approve").checked = cfg.approve;
     syncSettingsProvider();
     if (el("ai-settings")) el("ai-settings").hidden = false;
   }
@@ -543,8 +674,9 @@
     lsSet(KEYS.key, (el("ai-key").value || "").trim());
     lsSet(KEYS.base, (el("ai-base").value || "").trim());
     lsSet(KEYS.model, (el("ai-model").value || "").trim());
+    lsSet(KEYS.approve, el("ai-approve") && el("ai-approve").checked ? "1" : "");
     closeSettings();
-    renderNote("settings saved — provider: " + prov);
+    renderNote("settings saved — provider: " + prov + (el("ai-approve") && el("ai-approve").checked ? " · approve-each-edit on" : ""));
   }
   function forgetKey() {
     lsDel(KEYS.key);
@@ -570,10 +702,10 @@
   function init(opts) {
     W = (opts && opts.workspace) || window.Workspace;
     self = (opts && opts.self) || {};
-    history = []; running = false; stopped = false;
+    history = []; running = false; stopped = false; pendingApproval = null;
     const log = el("ai-log"); if (log) log.textContent = "";
     const form = el("ai-form"); if (form && !form._wired) { form.addEventListener("submit", onSubmit); form._wired = true; }
-    wireOnce("ai-stop", "click", () => { stopped = true; });
+    wireOnce("ai-stop", "click", () => { stopped = true; if (pendingApproval) pendingApproval(); });
     wireOnce("btn-ai", "click", toggle);
     wireOnce("btn-ai-close", "click", close);
     wireOnce("btn-ai-settings", "click", openSettings);

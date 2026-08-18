@@ -3,7 +3,7 @@
 // avoids stale/mixed asset versions — e.g. a fresh index.html paired with an old
 // app.js — which previously left new UI wired to missing handlers. The relay
 // WebSocket is never intercepted. No push handling — scriptorium has none.
-const CACHE = "scriptorium-shell-v15";
+const CACHE = "scriptorium-shell-v16";
 const SHELL = [
   "/", "/index.html", "/app.js", "/workspace.js", "/assistant.js", "/huddle.js", "/download.js", "/cloud.js", "/publish.js", "/style.css",
   "/markdown.bundle.js", "/editor.bundle.js", "/cloudcrypto.bundle.js",

@@ -928,6 +928,35 @@
     const t = contents.get(requireTextFile(path));
     return t ? t.toString() : "";
   }
+  // Pure form of fsEdit's find/replace (same indexOf + replace_all +
+  // not-found/not-unique semantics) computed on a plain string — used by
+  // fsPreview so the approve-diff shows exactly what fsEdit would apply. KEEP IN
+  // SYNC with fsEdit below.
+  function editedString(src, edits, path) {
+    if (!Array.isArray(edits) || edits.length === 0) throw new Error("no edits provided");
+    let s = src;
+    for (const e of edits) {
+      const oldStr = e.old_string;
+      const newStr = e.new_string != null ? e.new_string : "";
+      if (!oldStr) throw new Error("edit missing old_string");
+      const idxs = [];
+      for (let at = s.indexOf(oldStr); at !== -1; at = s.indexOf(oldStr, at + oldStr.length)) idxs.push(at);
+      if (idxs.length === 0) throw new Error("old_string not found in " + path + ": " + previewStr(oldStr));
+      if (idxs.length > 1 && !e.replace_all) {
+        throw new Error("old_string is not unique in " + path + " (" + idxs.length + " matches) — add surrounding context or set replace_all");
+      }
+      if (e.replace_all) {
+        s = s.split(oldStr).join(newStr);
+      } else {
+        const at = idxs[0];
+        s = s.slice(0, at) + newStr + s.slice(at + oldStr.length);
+      }
+    }
+    return s;
+  }
+
+  // fsEdit applies edits incrementally to the Y.Text (keeps CRDT deltas small);
+  // its find/replace semantics are mirrored purely in editedString above.
   function fsEdit(path, edits) {
     const t = contents.get(requireTextFile(path));
     if (!Array.isArray(edits) || edits.length === 0) throw new Error("no edits provided");
@@ -1061,6 +1090,62 @@
       }
     }, AI_ORIGIN);
     return "created folder " + parts.join("/");
+  }
+
+  // Compute what a mutating AI tool WOULD do, without touching the doc — powers
+  // the assistant's approve-diff mode. Returns { ops:[{kind,path,before?,after?,
+  // newPath?}] }; mirrors each mutator's validation so the preview matches Apply
+  // (throws the same errors, so nothing is proposed for an invalid call).
+  function fsPreview(name, p) {
+    p = p || {};
+    switch (name) {
+      case "edit_file": {
+        const before = fsRead(p.path); // throws if missing / not a text file
+        return { ops: [{ kind: "edit", path: p.path, before, after: editedString(before, p.edits, p.path) }] };
+      }
+      case "write_file": {
+        const id = pathToId(p.path);
+        if (id) {
+          if (meta.get(id).kind !== "file") throw new Error("not a file: " + p.path);
+          if (isBinNode(meta.get(id))) throw new Error("binary file (cannot overwrite as text): " + p.path);
+        }
+        return { ops: [{ kind: id ? "write" : "create", path: p.path, before: id ? fsRead(p.path) : "", after: p.content != null ? p.content : "" }] };
+      }
+      case "create_file": {
+        if (pathToId(p.path)) throw new Error("already exists: " + p.path);
+        return { ops: [{ kind: "create", path: p.path, before: "", after: p.content != null ? p.content : "" }] };
+      }
+      case "write_files": {
+        const files = p.files || [];
+        if (!files.length) throw new Error("no files provided");
+        return { ops: files.map((f) => {
+          if (!f || !f.path) throw new Error("each file needs a path");
+          const id = pathToId(f.path);
+          if (id) {
+            if (meta.get(id).kind !== "file") throw new Error("not a file: " + f.path);
+            if (isBinNode(meta.get(id))) throw new Error("binary file (cannot overwrite as text): " + f.path);
+          }
+          return { kind: id ? "write" : "create", path: f.path, before: id ? fsRead(f.path) : "", after: f.content != null ? f.content : "" };
+        }) };
+      }
+      case "make_dir":
+        return { ops: [{ kind: "mkdir", path: p.path }] };
+      case "move_file":
+      case "rename_file": {
+        if (!pathToId(p.path)) throw new Error("no such path: " + p.path);
+        if (pathToId(p.new_path)) throw new Error("target exists: " + p.new_path);
+        return { ops: [{ kind: "rename", path: p.path, newPath: p.new_path }] };
+      }
+      case "delete_file": {
+        const id = pathToId(p.path);
+        if (!id) throw new Error("no such path: " + p.path);
+        const n = meta.get(id);
+        const before = (n.kind === "file" && !isBinNode(n)) ? fsRead(p.path) : "";
+        return { ops: [{ kind: "delete", path: p.path, before, after: "" }] };
+      }
+      default:
+        return { ops: [] };
+    }
   }
 
   // ---- binary files ------------------------------------------------------
@@ -1219,6 +1304,7 @@
       list: fsList, read: fsRead, edit: fsEdit, write: fsWrite,
       create: fsCreate, rename: fsRename, remove: fsDelete, focus: fsFocus,
       search: fsSearch, writeMany: fsWriteMany, mkdir: fsMkdir,
+      preview: fsPreview, // dry-run a mutating tool for approve-diff mode
       checkpoint: aiCheckpoint, undo: aiUndoTurn, activity: setAIActivity,
     },
   };
