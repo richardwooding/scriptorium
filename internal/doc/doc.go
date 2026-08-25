@@ -186,10 +186,7 @@ func (s *Service) sendChunked(broadcast bool, to wire.ParticipantID, fileID stri
 	id := s.nextMsgID
 	for i := 0; i < total; i++ {
 		lo := i * chunkMax
-		hi := lo + chunkMax
-		if hi > len(blob) {
-			hi = len(blob)
-		}
+		hi := min(lo+chunkMax, len(blob))
 		var part []byte
 		if lo < len(blob) {
 			part = blob[lo:hi]
