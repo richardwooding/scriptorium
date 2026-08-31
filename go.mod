@@ -5,8 +5,8 @@ go 1.27.0
 require (
 	github.com/andybalholm/brotli v1.2.2
 	github.com/minio/minio-go/v7 v7.3.0
-	github.com/richardwooding/flyaffinity v0.1.1
-	github.com/richardwooding/parley v0.6.1
+	github.com/richardwooding/flyaffinity v0.1.3
+	github.com/richardwooding/parley v0.6.2
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	golang.org/x/crypto v0.55.0
 	golang.org/x/time v0.15.0
@@ -17,7 +17,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/coder/websocket v1.8.15 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/fxamacker/cbor/v2 v2.9.2 // indirect
+	github.com/fxamacker/cbor/v2 v2.9.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
