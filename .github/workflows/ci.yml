@@ -50,6 +50,8 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
+      - name: Zip import tests
+        run: node scripts/test-zipimport.js
       - name: Rebuild vendored JS bundles and check for drift
         run: |
           make vendor-js

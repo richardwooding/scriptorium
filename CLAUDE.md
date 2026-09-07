@@ -7,7 +7,10 @@ gets a code phrase, others join with it. Built on parley — the phrase seeds a
 PAKE handshake and ALL document traffic is end-to-end encrypted through a blind
 relay. Collaborative convergence is Yjs (a CRDT) running in the browser; the Go
 core is a blind relay of OPAQUE Yjs update blobs (like confab relays opaque
-SDP). Multi-file tree, syntax highlighting, markdown preview. Ephemeral base with
+SDP). Multi-file tree, syntax highlighting, markdown preview, client-side zip
+export/import (`web/src/download.js` writes; `web/src/zipimport.js` reads —
+uploading/dropping a real .zip merges it into the tree via
+`Workspace.importMerge`; no dependency, native De/CompressionStream). Ephemeral base with
 optional **E2EE-at-rest cloud sync**: `internal/cloudsign` (env-gated, dormant
 unless Tigris/S3 creds are set) presigns short-TTL PUT/GET URLs; the browser
 derives `cloudKey = HKDF(phrase)` in the WASM core, encrypts the Y.Doc snapshot

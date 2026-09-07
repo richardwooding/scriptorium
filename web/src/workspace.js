@@ -1195,8 +1195,19 @@
     const ext = (name.split(".").pop() || "").toLowerCase();
     return TEXT_EXTS.includes(ext);
   };
+  // Same toast as app.js's private one (#toast exists whenever workspace.js runs).
+  function flash(msg) {
+    const t = el("toast");
+    if (!t) return;
+    t.textContent = msg;
+    t.hidden = false;
+    clearTimeout(flash._t);
+    flash._t = setTimeout(() => { t.hidden = true; }, 3200);
+  }
   // Upload handler: import File objects — valid-UTF-8 text becomes an editable
-  // Y.Text file; everything else becomes a view-only binary blob.
+  // Y.Text file; everything else becomes a view-only binary blob. A real .zip
+  // (name AND magic — zip containers like .docx stay blobs) is unpacked and
+  // merged instead.
   async function importFiles(fileList, parent) {
     if (readOnly) return; // covers the upload button AND drag-drop
     const files = Array.from(fileList || []);
@@ -1204,6 +1215,14 @@
     for (const f of files) {
       try {
         const buf = new Uint8Array(await f.arrayBuffer());
+        if (window.ZipImport && window.ZipImport.isZip(f.name, f.type, buf)) {
+          const parsed = await window.ZipImport.parseZip(buf); // all async work happens here, before the merge transaction
+          const res = importMerge(parsed.entries, parent);
+          const skips = parsed.skipped.concat(res.skipped);
+          if (skips.length) console.warn("zip import skipped:", skips);
+          flash("imported " + res.written + " file(s) from " + f.name + (skips.length ? ", skipped " + skips.length : ""));
+          continue;
+        }
         const path = (parent ? parent + "/" : "") + f.name;
         if (looksTextual(f.name, f.type) && buf.length <= MAX_BLOB) {
           let text = null;
@@ -1227,6 +1246,10 @@
       }
     }
     if (lastId) openFile(lastId);
+    if (errs.length) {
+      console.warn("import errors:", errs);
+      flash(errs.length === 1 ? errs[0] : errs.length + " files failed to import");
+    }
     return { errors: errs };
   }
 
@@ -1271,6 +1294,101 @@
     return { written: prepared.length, skipped };
   }
 
+  // A path is blocked when an ancestor segment is an existing FILE, or when a
+  // file entry lands on an existing DIR — pathToId matches by name with no kind
+  // check and ensureParent only matches dirs, so without this a merge would
+  // silently create a duplicate-name sibling.
+  function kindConflict(path, isDir) {
+    const parts = splitPath(path);
+    let parentId = "";
+    for (let i = 0; i < parts.length; i++) {
+      const id = childrenOf(parentId).find((cid) => meta.get(cid).name === parts[i]);
+      if (id === undefined) return null; // rest of the chain is missing — no conflict
+      const n = meta.get(id);
+      if (i < parts.length - 1 || isDir) {
+        if (n.kind !== "dir") return "blocked by existing file";
+      } else if (n.kind !== "file") {
+        return "a folder exists here";
+      }
+      parentId = id;
+    }
+    return null;
+  }
+
+  // Merge an imported set of files (a zip) into the workspace: create missing
+  // folders, overwrite colliding paths, leave everything else alone. entries:
+  // [{ path, bytes?, dir?, mime? }] with pre-sanitized relative paths; all
+  // decompression must be done upstream — doc.transact is synchronous. One
+  // transaction = one broadcast; default origin (not "ai"), so uploads stay out
+  // of the assistant's UndoManager, like importFiles/putBinary.
+  function importMerge(entries, parent) {
+    const skipped = [];
+    if (readOnly) return { written: 0, skipped };
+    const prevSize = (id) => {
+      const b = blobs.get(id);
+      if (b) return b.length;
+      const t = contents.get(id);
+      return t ? new TextEncoder().encode(t.toString()).length : 0;
+    };
+    // One state encode for the whole batch (putBinary recomputes it per call,
+    // which is quadratic over many files).
+    let total = Y.encodeStateAsUpdate(doc).length;
+    const prepared = [];
+    for (const e of (entries || [])) {
+      const path = (parent ? parent + "/" : "") + e.path;
+      const conflict = kindConflict(path, !!e.dir);
+      if (conflict) { skipped.push({ path: e.path, reason: conflict }); continue; }
+      if (e.dir) { prepared.push({ path, dir: true }); continue; }
+      const bytes = e.bytes instanceof Uint8Array ? e.bytes : new Uint8Array(e.bytes || 0);
+      if (bytes.length > MAX_BLOB) { skipped.push({ path: e.path, reason: "over 5 MiB" }); continue; }
+      const existing = pathToId(path);
+      const prev = existing ? prevSize(existing) : 0;
+      if (total - prev + bytes.length > MAX_TOTAL) { skipped.push({ path: e.path, reason: "workspace size budget" }); continue; }
+      total += bytes.length - prev;
+      let text = null;
+      if (looksTextual(path, e.mime)) {
+        try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch (_) { text = null; }
+      }
+      prepared.push(text != null ? { path, text } : { path, bytes, mime: e.mime });
+    }
+    let lastId = null, written = 0;
+    doc.transact(() => {
+      for (const p of prepared) {
+        if (p.dir) { ensureParent(p.path + "/x"); continue; } // fake leaf: creates the full dir chain, so empty folders survive
+        let id = pathToId(p.path);
+        if (p.text != null) {
+          if (id) {
+            const n = meta.get(id);
+            if (isBinNode(n)) {
+              blobs.delete(id);
+              meta.set(id, { name: n.name, parent: n.parent, kind: "file", order: n.order });
+            }
+            if (!contents.get(id)) contents.set(id, new Y.Text());
+            const t = contents.get(id);
+            if (t.length) t.delete(0, t.length);
+            if (p.text) t.insert(0, p.text);
+          } else {
+            id = createFile(leafName(p.path), ensureParent(p.path));
+            if (p.text) contents.get(id).insert(0, p.text);
+          }
+        } else {
+          if (!id) {
+            id = uuid();
+            meta.set(id, { name: leafName(p.path), parent: ensureParent(p.path), kind: "file", order: meta.size, bin: true, mime: p.mime || mimeFromName(p.path) });
+          } else {
+            contents.delete(id); // in case it was a text file being replaced
+            meta.set(id, Object.assign({}, meta.get(id), { bin: true, mime: p.mime || mimeFromName(p.path) }));
+          }
+          blobs.set(id, p.bytes);
+        }
+        lastId = id;
+        written++;
+      }
+    });
+    if (lastId) openFile(lastId);
+    return { written, skipped };
+  }
+
   function aiCheckpoint() { if (aiUndo) aiUndo.stopCapturing(); }
   function aiUndoTurn() {
     if (!aiUndo) return false;
@@ -1298,7 +1416,7 @@
     // huddle voice-chat membership (huddle.js)
     setHuddle, registerHuddleObserver,
     // binary files: upload/store/read raw bytes (used by uploads, download.js, assistant.js)
-    putBinary, readBytes, importFiles, importReplace,
+    putBinary, readBytes, importFiles, importReplace, importMerge,
     // AI assistant surface (assistant.js)
     ai: {
       list: fsList, read: fsRead, edit: fsEdit, write: fsWrite,
