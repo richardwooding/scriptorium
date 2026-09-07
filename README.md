@@ -19,7 +19,8 @@ design as its sibling [confab](https://github.com/richardwooding/confab).
   link*) and people join as spectators: they watch live edits (and can join the
   huddle) but can't type, upload, rename, delete, or run the assistant.
 - **Multi-file** — a tree of files/folders; highlight by extension; live
-  markdown preview.
+  markdown preview. Export the workspace as a zip, or drop a .zip in to
+  unpack and merge a whole folder tree — both entirely client-side.
 - **Ephemeral by default, optionally persistent** — a workspace lives while
   someone's connected; enable **E2EE-at-rest cloud sync** (Tigris) and the host
   autosaves an encrypted snapshot that's restored on reopen. The store only ever
