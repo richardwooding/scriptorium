@@ -1204,52 +1204,61 @@
     clearTimeout(flash._t);
     flash._t = setTimeout(() => { t.hidden = true; }, 3200);
   }
+  // Unpack a .zip and merge it into the workspace. All async work (inflation)
+  // happens in parseZip, before importMerge's synchronous transaction.
+  async function importZip(f, buf, parent) {
+    const parsed = await window.ZipImport.parseZip(buf);
+    const res = importMerge(parsed.entries, parent);
+    const skips = parsed.skipped.concat(res.skipped);
+    if (skips.length) console.warn("zip import skipped:", skips);
+    flash("imported " + res.written + " file(s) from " + f.name + (skips.length ? ", skipped " + skips.length : ""));
+  }
+  // Store an upload as an editable Y.Text file if it decodes as UTF-8 text;
+  // null means "not text — store as a binary blob instead".
+  function importTextFile(path, buf, mime) {
+    if (!looksTextual(path, mime) || buf.length > MAX_BLOB) return null;
+    let text = null;
+    try { text = new TextDecoder("utf-8", { fatal: true }).decode(buf); } catch (_) { return null; }
+    let id = null;
+    doc.transact(() => {
+      id = pathToId(path) || createFile(leafName(path), ensureParent(path));
+      const t = contents.get(id);
+      if (t && t.length) t.delete(0, t.length);
+      if (text) contents.get(id).insert(0, text);
+    });
+    return id;
+  }
+  function importOneFile(f, buf, parent) {
+    const path = (parent ? parent + "/" : "") + f.name;
+    const id = importTextFile(path, buf, f.type);
+    if (id != null) return id;
+    putBinary(path, buf, f.type);
+    return pathToId(path);
+  }
+  const importErrMsg = (f, e) => f.name + ": " + (e && e.message ? e.message : e);
+  function reportImportErrors(errs) {
+    if (!errs.length) return;
+    console.warn("import errors:", errs);
+    flash(errs.length === 1 ? errs[0] : errs.length + " files failed to import");
+  }
   // Upload handler: import File objects — valid-UTF-8 text becomes an editable
   // Y.Text file; everything else becomes a view-only binary blob. A real .zip
   // (name AND magic — zip containers like .docx stay blobs) is unpacked and
   // merged instead.
   async function importFiles(fileList, parent) {
     if (readOnly) return; // covers the upload button AND drag-drop
-    const files = Array.from(fileList || []);
     let lastId = null, errs = [];
-    for (const f of files) {
+    for (const f of Array.from(fileList || [])) {
       try {
         const buf = new Uint8Array(await f.arrayBuffer());
-        if (window.ZipImport && window.ZipImport.isZip(f.name, f.type, buf)) {
-          const parsed = await window.ZipImport.parseZip(buf); // all async work happens here, before the merge transaction
-          const res = importMerge(parsed.entries, parent);
-          const skips = parsed.skipped.concat(res.skipped);
-          if (skips.length) console.warn("zip import skipped:", skips);
-          flash("imported " + res.written + " file(s) from " + f.name + (skips.length ? ", skipped " + skips.length : ""));
-          continue;
-        }
-        const path = (parent ? parent + "/" : "") + f.name;
-        if (looksTextual(f.name, f.type) && buf.length <= MAX_BLOB) {
-          let text = null;
-          try { text = new TextDecoder("utf-8", { fatal: true }).decode(buf); } catch (_) { text = null; }
-          if (text != null) {
-            doc.transact(() => {
-              let id = pathToId(path);
-              if (!id) id = createFile(leafName(path), ensureParent(path));
-              const t = contents.get(id);
-              if (t && t.length) t.delete(0, t.length);
-              if (text) contents.get(id).insert(0, text);
-              lastId = id;
-            });
-            continue;
-          }
-        }
-        putBinary(path, buf, f.type);
-        lastId = pathToId(path);
+        if (window.ZipImport && window.ZipImport.isZip(f.name, f.type, buf)) await importZip(f, buf, parent);
+        else lastId = importOneFile(f, buf, parent);
       } catch (e) {
-        errs.push(f.name + ": " + (e && e.message ? e.message : e));
+        errs.push(importErrMsg(f, e));
       }
     }
     if (lastId) openFile(lastId);
-    if (errs.length) {
-      console.warn("import errors:", errs);
-      flash(errs.length === 1 ? errs[0] : errs.length + " files failed to import");
-    }
+    reportImportErrors(errs);
     return { errors: errs };
   }
 
@@ -1315,6 +1324,63 @@
     return null;
   }
 
+  function mergePrevSize(id) {
+    const b = blobs.get(id);
+    if (b) return b.length;
+    const t = contents.get(id);
+    return t ? new TextEncoder().encode(t.toString()).length : 0;
+  }
+  // Validate + classify one merge entry against the shared size budget; returns
+  // { prep } to write or { skip } with the reason.
+  function prepMergeEntry(e, parent, budget) {
+    const path = (parent ? parent + "/" : "") + e.path;
+    const conflict = kindConflict(path, !!e.dir);
+    if (conflict) return { skip: conflict };
+    if (e.dir) return { prep: { path, dir: true } };
+    const bytes = e.bytes instanceof Uint8Array ? e.bytes : new Uint8Array(e.bytes || 0);
+    if (bytes.length > MAX_BLOB) return { skip: "over 5 MiB" };
+    const existing = pathToId(path);
+    const prev = existing ? mergePrevSize(existing) : 0;
+    if (budget.total - prev + bytes.length > MAX_TOTAL) return { skip: "workspace size budget" };
+    budget.total += bytes.length - prev;
+    let text = null;
+    if (looksTextual(path, e.mime)) {
+      try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch (_) { text = null; }
+    }
+    return { prep: text != null ? { path, text } : { path, bytes, mime: e.mime } };
+  }
+  // Transaction bodies for one merged entry (create or overwrite in place,
+  // flipping the text/binary kind when the colliding file's kind differs).
+  function mergeTextEntry(p) {
+    let id = pathToId(p.path);
+    if (!id) {
+      id = createFile(leafName(p.path), ensureParent(p.path));
+      if (p.text) contents.get(id).insert(0, p.text);
+      return id;
+    }
+    const n = meta.get(id);
+    if (isBinNode(n)) {
+      blobs.delete(id);
+      meta.set(id, { name: n.name, parent: n.parent, kind: "file", order: n.order });
+    }
+    if (!contents.get(id)) contents.set(id, new Y.Text());
+    const t = contents.get(id);
+    if (t.length) t.delete(0, t.length);
+    if (p.text) t.insert(0, p.text);
+    return id;
+  }
+  function mergeBlobEntry(p) {
+    let id = pathToId(p.path);
+    if (!id) {
+      id = uuid();
+      meta.set(id, { name: leafName(p.path), parent: ensureParent(p.path), kind: "file", order: meta.size, bin: true, mime: p.mime || mimeFromName(p.path) });
+    } else {
+      contents.delete(id); // in case it was a text file being replaced
+      meta.set(id, Object.assign({}, meta.get(id), { bin: true, mime: p.mime || mimeFromName(p.path) }));
+    }
+    blobs.set(id, p.bytes);
+    return id;
+  }
   // Merge an imported set of files (a zip) into the workspace: create missing
   // folders, overwrite colliding paths, leave everything else alone. entries:
   // [{ path, bytes?, dir?, mime? }] with pre-sanitized relative paths; all
@@ -1324,64 +1390,20 @@
   function importMerge(entries, parent) {
     const skipped = [];
     if (readOnly) return { written: 0, skipped };
-    const prevSize = (id) => {
-      const b = blobs.get(id);
-      if (b) return b.length;
-      const t = contents.get(id);
-      return t ? new TextEncoder().encode(t.toString()).length : 0;
-    };
     // One state encode for the whole batch (putBinary recomputes it per call,
     // which is quadratic over many files).
-    let total = Y.encodeStateAsUpdate(doc).length;
+    const budget = { total: Y.encodeStateAsUpdate(doc).length };
     const prepared = [];
     for (const e of (entries || [])) {
-      const path = (parent ? parent + "/" : "") + e.path;
-      const conflict = kindConflict(path, !!e.dir);
-      if (conflict) { skipped.push({ path: e.path, reason: conflict }); continue; }
-      if (e.dir) { prepared.push({ path, dir: true }); continue; }
-      const bytes = e.bytes instanceof Uint8Array ? e.bytes : new Uint8Array(e.bytes || 0);
-      if (bytes.length > MAX_BLOB) { skipped.push({ path: e.path, reason: "over 5 MiB" }); continue; }
-      const existing = pathToId(path);
-      const prev = existing ? prevSize(existing) : 0;
-      if (total - prev + bytes.length > MAX_TOTAL) { skipped.push({ path: e.path, reason: "workspace size budget" }); continue; }
-      total += bytes.length - prev;
-      let text = null;
-      if (looksTextual(path, e.mime)) {
-        try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch (_) { text = null; }
-      }
-      prepared.push(text != null ? { path, text } : { path, bytes, mime: e.mime });
+      const r = prepMergeEntry(e, parent, budget);
+      if (r.skip) skipped.push({ path: e.path, reason: r.skip });
+      else prepared.push(r.prep);
     }
     let lastId = null, written = 0;
     doc.transact(() => {
       for (const p of prepared) {
         if (p.dir) { ensureParent(p.path + "/x"); continue; } // fake leaf: creates the full dir chain, so empty folders survive
-        let id = pathToId(p.path);
-        if (p.text != null) {
-          if (id) {
-            const n = meta.get(id);
-            if (isBinNode(n)) {
-              blobs.delete(id);
-              meta.set(id, { name: n.name, parent: n.parent, kind: "file", order: n.order });
-            }
-            if (!contents.get(id)) contents.set(id, new Y.Text());
-            const t = contents.get(id);
-            if (t.length) t.delete(0, t.length);
-            if (p.text) t.insert(0, p.text);
-          } else {
-            id = createFile(leafName(p.path), ensureParent(p.path));
-            if (p.text) contents.get(id).insert(0, p.text);
-          }
-        } else {
-          if (!id) {
-            id = uuid();
-            meta.set(id, { name: leafName(p.path), parent: ensureParent(p.path), kind: "file", order: meta.size, bin: true, mime: p.mime || mimeFromName(p.path) });
-          } else {
-            contents.delete(id); // in case it was a text file being replaced
-            meta.set(id, Object.assign({}, meta.get(id), { bin: true, mime: p.mime || mimeFromName(p.path) }));
-          }
-          blobs.set(id, p.bytes);
-        }
-        lastId = id;
+        lastId = p.text != null ? mergeTextEntry(p) : mergeBlobEntry(p);
         written++;
       }
     });
