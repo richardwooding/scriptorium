@@ -139,38 +139,48 @@
     return (bytes[2] === 3 && bytes[3] === 4) || (bytes[2] === 5 && bytes[3] === 6);
   }
 
+  // One central-directory record -> { entry }, { skip: {path, reason} }, or
+  // null for junk. Everything is checked BEFORE inflating (zip-bomb guard).
+  async function readEntry(view, bytes, r) {
+    if (junk(r.name)) return null;
+    const path = safeName(r.name);
+    if (!path) return { skip: { path: r.name, reason: "unsafe name" } };
+    if (r.name.endsWith("/")) return { entry: { path, dir: true } };
+    if (r.flags & 1) return { skip: { path, reason: "encrypted" } };
+    if (r.method !== 0 && r.method !== 8) return { skip: { path, reason: "unsupported compression" } };
+    if (r.uncompSize > MAX_FILE) return { skip: { path, reason: "over 5 MiB" } };
+    const start = dataStart(view, r.localOffset);
+    // Slice exactly compSize bytes: DecompressionStream can reject trailing data.
+    const slice = bytes.subarray(start, start + r.compSize);
+    let out = slice;
+    if (r.method === 8) {
+      out = await inflateRaw(slice);
+      if (out == null) return { skip: { path, reason: "browser can't decompress" } };
+    }
+    if (out.length !== r.uncompSize || crc32(out) !== r.crc) return { skip: { path, reason: "corrupt entry" } };
+    return { entry: { path, bytes: out } };
+  }
+
   async function parseZip(bytes) {
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const records = parseCentral(view, findEOCD(view));
     const entries = [], skipped = [];
     let files = 0;
-    for (const r of records) {
-      try {
-        if (junk(r.name)) continue;
-        const path = safeName(r.name);
-        if (!path) { skipped.push({ path: r.name, reason: "unsafe name" }); continue; }
-        if (r.name.endsWith("/")) { entries.push({ path, dir: true }); continue; }
-        if (r.flags & 1) { skipped.push({ path, reason: "encrypted" }); continue; }
-        if (r.method !== 0 && r.method !== 8) { skipped.push({ path, reason: "unsupported compression" }); continue; }
-        if (r.uncompSize > MAX_FILE) { skipped.push({ path, reason: "over 5 MiB" }); continue; }
-        if (files >= MAX_FILES) { skipped.push({ path, reason: "file cap reached" }); continue; }
-        const start = dataStart(view, r.localOffset);
-        // Slice exactly compSize bytes: DecompressionStream can reject trailing data.
-        const slice = bytes.subarray(start, start + r.compSize);
-        let out = slice;
-        if (r.method === 8) {
-          out = await inflateRaw(slice);
-          if (out == null) { skipped.push({ path, reason: "browser can't decompress" }); continue; }
-        }
-        if (out.length !== r.uncompSize || crc32(out) !== r.crc) {
-          skipped.push({ path, reason: "corrupt entry" });
-          continue;
-        }
-        entries.push({ path, bytes: out });
-        files++;
-      } catch (_) {
-        skipped.push({ path: safeName(r.name) || r.name, reason: "unreadable entry" });
+    for (const r of parseCentral(view, findEOCD(view))) {
+      // Cap checked up front so entries past it are never inflated.
+      if (files >= MAX_FILES && !r.name.endsWith("/")) {
+        skipped.push({ path: safeName(r.name) || r.name, reason: "file cap reached" });
+        continue;
       }
+      let res;
+      try {
+        res = await readEntry(view, bytes, r);
+      } catch (_) {
+        res = { skip: { path: safeName(r.name) || r.name, reason: "unreadable entry" } };
+      }
+      if (!res) continue;
+      if (res.skip) { skipped.push(res.skip); continue; }
+      entries.push(res.entry);
+      if (!res.entry.dir) files++;
     }
     return { entries: stripCommonRoot(entries), skipped };
   }
