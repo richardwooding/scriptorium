@@ -44,7 +44,7 @@ current workspace** (a confirm guards it, and it's one undo step). Text files
 become editable; binaries become view-only, subject to the same per-file (5 MiB)
 and whole-workspace size caps — oversized/over-budget files are skipped and
 listed. A **public repo needs no token**; a private one uses the same token as
-Publish. Large repos are capped (first 400 files) and may hit GitHub's
+Publish. Large repos are capped (first 2000 files) and may hit GitHub's
 unauthenticated rate limit — add a token for headroom.
 
 ## Build & publish artifacts (GitHub Actions)

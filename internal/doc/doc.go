@@ -40,9 +40,9 @@ const chunkMax = 48 * 1024
 
 // Reassembly safety caps (defend a joiner against a malicious/buggy peer).
 const (
-	maxChunks     = 4096             // cap Total: 4096 * 48KiB = 192MiB ceiling per logical message
-	maxReasmBytes = 32 * 1024 * 1024 // cap buffered bytes per (from,fileID) in flight
-	reasmTTL      = 60 * time.Second // drop a partial that never completes
+	maxChunks     = 4096              // cap Total: 4096 * 48KiB = 192MiB ceiling per logical message
+	maxReasmBytes = 128 * 1024 * 1024 // cap buffered bytes per (from,fileID) in flight; 2x JS MAX_TOTAL, which counts raw bytes while the wire carries larger encoded CRDT state (incl. tombstones)
+	reasmTTL      = 60 * time.Second  // drop a partial that never completes
 )
 
 // Wire kinds.

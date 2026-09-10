@@ -9,7 +9,7 @@
   "use strict";
 
   const MAX_FILE = 5 * 1024 * 1024;  // matches workspace.js MAX_BLOB
-  const MAX_FILES = 400;             // matches publish.js GitHub-import cap
+  const MAX_FILES = 2000;            // matches publish.js GitHub-import cap
 
   // ---- CRC32 (table-based) ----------------------------------------------
   const CRC_TABLE = (() => {

@@ -196,7 +196,7 @@
       const tree = await gh("GET", "/repos/" + owner + "/" + repo + "/git/trees/" + treeSha + "?recursive=1");
       if (tree.truncated) log("note: the repo is large — GitHub truncated the tree; some files may be missing");
       let entries = tree.tree.filter((e) => e.type === "blob");
-      const MAX_FILES = 400;
+      const MAX_FILES = 2000;
       let capped = false;
       if (entries.length > MAX_FILES) { entries = entries.slice(0, MAX_FILES); capped = true; }
       log("fetching " + entries.length + " file(s)…");

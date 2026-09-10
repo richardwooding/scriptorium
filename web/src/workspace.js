@@ -1150,7 +1150,7 @@
 
   // ---- binary files ------------------------------------------------------
   const MAX_BLOB = 5 * 1024 * 1024;         // 5 MiB per file
-  const MAX_TOTAL = 24 * 1024 * 1024;       // keep whole-state well under the 32 MiB catch-up ceiling
+  const MAX_TOTAL = 64 * 1024 * 1024;       // raw-byte budget; encoded state is larger, so stay well under doc.maxReasmBytes (128 MiB)
   const TEXT_EXTS = ["txt", "md", "markdown", "js", "mjs", "cjs", "jsx", "ts", "tsx",
     "json", "yaml", "yml", "toml", "html", "htm", "css", "go", "py", "rs", "sh",
     "bash", "zsh", "c", "h", "cpp", "hpp", "java", "rb", "php", "sql", "xml", "csv",
