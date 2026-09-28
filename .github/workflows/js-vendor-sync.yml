@@ -1,35 +1,99 @@
-# Weekly check that the committed JS bundles match a fresh vendor build from the
-# pinned versions, opening a PR if esbuild output drifts (e.g. a transitive
-# rebuild). Dependency version bumps themselves come via dependabot on
-# jsvendor/package.json; this keeps the built artifacts honest.
+# Keeps the committed browser bundles in web/src honest.
+#
+# Two jobs:
+#   regenerate — on any PR touching jsvendor/, rebuild the bundles and push the
+#     result back onto the PR branch. Dependabot edits jsvendor/package.json but
+#     cannot run `make vendor-js`, so without this every npm PR fails the
+#     vendor-js drift check in ci.yml by construction, and fixing the branches
+#     by hand does not hold: dependabot force-pushes when it rebases and the
+#     regeneration is discarded.
+#   weekly — catch drift on the default branch (e.g. a transitive esbuild
+#     rebuild) and open a PR.
+#
+# Both need VENDOR_SYNC_TOKEN: a PAT or GitHub App token with Contents and
+# Pull requests read/write.
+#   gh secret set VENDOR_SYNC_TOKEN --repo {owner}/{repo} --body "$PAT"
+# GitHub does not trigger workflows from pushes or PRs made with the built-in
+# GITHUB_TOKEN, and it forces GITHUB_TOKEN to read-only on dependabot-triggered
+# events. With the built-in token the push back to a dependabot branch is
+# rejected outright, and a weekly drift PR would open with zero checks.
+# Without the secret this falls back to github.token and keeps today's
+# behaviour rather than failing the run.
 name: js-vendor-sync
+
 on:
+  pull_request:
+    paths:
+      - "jsvendor/package.json"
+      - "jsvendor/package-lock.json"
   schedule:
     - cron: "0 6 * * 1"
   workflow_dispatch:
+
 permissions:
   contents: write
   pull-requests: write
+
 jobs:
-  sync:
+  regenerate:
+    # Same-repo branches only — a fork PR cannot be pushed back to.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.VENDOR_SYNC_TOKEN || github.token }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - run: make vendor-js
+      - name: Commit regenerated bundles back onto the PR branch
+        run: |
+          if git diff --quiet -- web/src/*.bundle.js web/src/.js-vendor-version web/src/katex.css; then
+            echo "bundles already match the pinned versions."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add web/src/*.bundle.js web/src/.js-vendor-version web/src/katex.css
+          git commit -m "chore: regenerate vendored JS bundles"
+          # Re-runs this workflow; the rebuild is then a no-op, so it settles.
+          git push origin "HEAD:${GITHUB_HEAD_REF}"
+
+  weekly:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.VENDOR_SYNC_TOKEN || github.token }}
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
       - run: make vendor-js
       - name: Open a PR if bundles changed
-        run: |
-          if ! git diff --quiet -- web/src/*.bundle.js web/src/.js-vendor-version; then
-            git config user.name  "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            branch="js-vendor-sync-$(date +%Y%m%d)"
-            git checkout -b "$branch"
-            git add web/src/*.bundle.js web/src/.js-vendor-version
-            git commit -m "chore: refresh vendored JS bundles"
-            git push -u origin "$branch"
-            gh pr create --fill --title "chore: refresh vendored JS bundles" --body "Automated re-vendor of Yjs/CodeMirror/markdown bundles."
-          fi
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.VENDOR_SYNC_TOKEN || github.token }}
+        run: |
+          if git diff --quiet -- web/src/*.bundle.js web/src/.js-vendor-version web/src/katex.css; then
+            echo "no drift."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          branch="js-vendor-sync-$(date +%Y%m%d)"
+          git switch -C "$branch"
+          git add web/src/*.bundle.js web/src/.js-vendor-version web/src/katex.css
+          git commit -m "chore: refresh vendored JS bundles"
+          git push -f -u origin "$branch"
+          STATE="$(gh pr view "$branch" --json state --jq .state 2>/dev/null || true)"
+          if [ "$STATE" = "OPEN" ]; then
+            echo "PR already open; updated the branch."
+          else
+            gh pr create --base "${GITHUB_REF_NAME}" --head "$branch" \
+              --title "chore: refresh vendored JS bundles" \
+              --body "Automated re-vendor of the committed browser bundles from the versions pinned in \`jsvendor/package.json\`."
+          fi
