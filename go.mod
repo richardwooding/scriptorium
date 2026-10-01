@@ -3,7 +3,7 @@ module github.com/richardwooding/scriptorium
 go 1.27.0
 
 require (
-	github.com/andybalholm/brotli v1.2.4
+	github.com/andybalholm/brotli v1.2.5
 	github.com/minio/minio-go/v7 v7.3.0
 	github.com/richardwooding/flyaffinity v0.1.3
 	github.com/richardwooding/parley v0.6.3
