@@ -34,8 +34,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/richardwooding/flyaffinity v0.1.3 h1:xn9cFxsU2NVaA6kayDmmXgdMKtAMiZiuzns4IAjCFWI=
 github.com/richardwooding/flyaffinity v0.1.3/go.mod h1:BL0esG0yTayEkAUKQmntC/Y8iS7zuQM7B3ulSJVL3yE=
-github.com/richardwooding/parley v0.6.3 h1:uwHFDK5AxVWlYtzakXO4Rwup4StnxdReJqSLVfs3Isk=
-github.com/richardwooding/parley v0.6.3/go.mod h1:V3fuNM4cHXLbtmoFjCL9k+e8l9YSgd6G4LgcEu+35tc=
+github.com/richardwooding/parley v0.6.4 h1:a3jO/zeX5vDA8YPkC96/72rPKdv1p6KR3I9yD4s7gcI=
+github.com/richardwooding/parley v0.6.4/go.mod h1:V3fuNM4cHXLbtmoFjCL9k+e8l9YSgd6G4LgcEu+35tc=
 github.com/rs/xid v1.6.0 h1:fV591PaemRlL6JfRxGDEPl69wICngIQ3shQtzfy2gxU=
 github.com/rs/xid v1.6.0/go.mod h1:7XoLgs4eV+QndskICGsho+ADou8ySMSjJKDIan90Nz0=
 github.com/schollz/pake/v3 v3.2.0 h1:WKHZVU8ulWRgXTMH6mpynz2cl2tBRo0G1McAcRslB04=
